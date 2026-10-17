@@ -1,0 +1,459 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String               @id @default(uuid())
+  name         String
+  email        String               @unique
+  passwordHash String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  memberships  OrganizationMember[]
+  auditLogs    AuditLog[]
+}
+
+model Organization {
+  id              String               @id @default(uuid())
+  name            String
+  slug            String               @unique
+  settings        Json                 @default("{}")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  members         OrganizationMember[]
+  projects        Project[]
+  subscription    Subscription?
+  billingCustomer BillingCustomer?
+}
+
+model OrganizationMember {
+  id           String       @id @default(uuid())
+  orgId        String
+  userId       String
+  role         String
+  projectIds   String[]     @default([])
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+}
+
+model Permission {
+  id        String           @id @default(uuid())
+  name      String           @unique
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  roles     RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model Project {
+  id               String                 @id @default(uuid())
+  orgId            String
+  name             String
+  slug             String
+  deletedAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  organization     Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  environments     Environment[]
+  resources        MonitoredResource[]
+  agents           Agent[]
+  credentials      AgentCredential[]
+  enrollmentTokens AgentEnrollmentToken[]
+  alertRules       AlertRule[]
+  uptimeMonitors   UptimeMonitor[]
+
+  @@unique([orgId, slug])
+  @@unique([orgId, id])
+}
+
+model Environment {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+
+  @@unique([orgId, projectId, name])
+}
+
+model MonitoredResource {
+  id          String          @id @default(uuid())
+  orgId       String
+  projectId   String
+  agentId     String?
+  externalId  String?
+  name        String
+  type        String
+  environment String
+  status      String
+  labels      Json            @default("{}")
+  deletedAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  project     Project         @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  agent       Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  incidents   AlertIncident[]
+
+  @@unique([orgId, externalId])
+  @@index([orgId, projectId, type, environment])
+}
+
+model Agent {
+  id          String               @id @default(uuid())
+  orgId       String
+  projectId   String
+  name        String
+  platform    String
+  version     String
+  status      String
+  lastSeen    DateTime
+  demo        Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  project     Project              @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  credentials AgentCredential[]
+  configs     AgentConfigVersion[]
+  resources   MonitoredResource[]
+
+  @@index([orgId, projectId, status])
+}
+
+model AgentCredential {
+  id        String    @id @default(uuid())
+  orgId     String
+  projectId String
+  agentId   String?
+  name      String
+  kind      String
+  prefix    String
+  tokenHash String    @unique
+  revokedAt DateTime?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  project   Project   @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  agent     Agent?    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, projectId, kind])
+}
+
+model AgentEnrollmentToken {
+  id        String    @id @default(uuid())
+  orgId     String
+  projectId String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  project   Project   @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+
+  @@index([orgId, expiresAt])
+}
+
+model AgentConfigVersion {
+  id        String   @id @default(uuid())
+  orgId     String
+  agentId   String
+  version   Int
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, version])
+  @@index([orgId])
+}
+
+model SubscriptionPlan {
+  id            String         @id
+  name          String
+  price         Int
+  currency      String
+  servers       Int
+  containers    Int
+  logGb         Int
+  traceGb       Int
+  metricsGb     Int
+  members       Int
+  alertRules    Int
+  retentionDays Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  subscriptions Subscription[]
+  features      PlanFeature[]
+}
+
+model PlanFeature {
+  id        String           @id @default(uuid())
+  planId    String
+  key       String
+  value     Json
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  plan      SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, key])
+}
+
+model Subscription {
+  id                String           @id @default(uuid())
+  orgId             String           @unique
+  planId            String
+  status            String
+  interval          String
+  periodEnd         DateTime
+  cancelAtPeriodEnd Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  organization      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan              SubscriptionPlan @relation(fields: [planId], references: [id])
+}
+
+model BillingCustomer {
+  id           String       @id @default(uuid())
+  orgId        String       @unique
+  provider     String
+  providerId   String       @unique
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  orgId       String
+  number      String   @unique
+  amount      Int
+  currency    String
+  status      String
+  provider    String
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+}
+
+model Payment {
+  id         String   @id @default(uuid())
+  orgId      String
+  providerId String   @unique
+  provider   String
+  amount     Int
+  currency   String
+  status     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+}
+
+model UsageRecord {
+  id        String   @id @default(uuid())
+  orgId     String
+  kind      String
+  bytes     Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+}
+
+model UsageAggregate {
+  id        String   @id @default(uuid())
+  orgId     String
+  kind      String
+  period    String
+  bytes     Float
+  requests  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, kind, period])
+}
+
+model Alert {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model AlertRule {
+  id              String          @id @default(uuid())
+  orgId           String
+  projectId       String
+  name            String
+  metric          String
+  operator        String
+  threshold       Float
+  durationSeconds Int
+  cooldownSeconds Int
+  enabled         Boolean         @default(true)
+  severity        String
+  silenceUntil    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  project         Project         @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  incidents       AlertIncident[]
+
+  @@index([orgId, projectId, enabled])
+}
+
+model AlertIncident {
+  id             String                 @id @default(uuid())
+  orgId          String
+  projectId      String
+  ruleId         String
+  resourceId     String
+  name           String
+  severity       String
+  state          String
+  value          Float
+  startedAt      DateTime
+  resolvedAt     DateTime?
+  lastNotifiedAt DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  rule           AlertRule              @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  resource       MonitoredResource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  deliveries     NotificationDelivery[]
+
+  @@index([orgId, projectId, state])
+}
+
+model NotificationChannel {
+  id         String                 @id @default(uuid())
+  orgId      String
+  name       String
+  type       String
+  address    String
+  enabled    Boolean                @default(true)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+  deliveries NotificationDelivery[]
+
+  @@index([orgId])
+}
+
+model NotificationDelivery {
+  id            String              @id @default(uuid())
+  orgId         String
+  incidentId    String
+  channelId     String
+  address       String
+  subject       String
+  body          String
+  status        String
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime
+  deliveredAt   DateTime?
+  error         String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  incident      AlertIncident       @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  channel       NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, nextAttemptAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  orgId     String
+  userId    String
+  action    String
+  target    String
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([orgId, createdAt])
+}
+
+model WebhookEvent {
+  id        String   @id
+  orgId     String
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+}
+
+model UptimeMonitor {
+  id                   String        @id @default(uuid())
+  orgId                String
+  projectId            String
+  name                 String
+  target               String
+  intervalSeconds      Int
+  failureThreshold     Int
+  consecutiveFailures  Int           @default(0)
+  enabled              Boolean       @default(true)
+  status               String
+  latencyMs            Float?
+  lastCheckedAt        DateTime?
+  nextCheckAt          DateTime?
+  certificateExpiresAt DateTime?
+  demo                 Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  project              Project       @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  checks               UptimeCheck[]
+
+  @@index([orgId, projectId, enabled])
+}
+
+model UptimeCheck {
+  id                   String        @id @default(uuid())
+  orgId                String
+  monitorId            String
+  ok                   Boolean
+  statusCode           Int
+  latencyMs            Float
+  certificateExpiresAt DateTime?
+  error                String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  monitor              UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, monitorId, createdAt])
+}

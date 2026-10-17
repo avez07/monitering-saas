@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-17T13:50:43.898Z",
+  "mode": "demo control-plane API; not telemetry storage",
+  "tenants": 10,
+  "requests": 100,
+  "concurrency": 5,
+  "errors": 0,
+  "durationMs": 79,
+  "requestsPerSecond": 1258.76,
+  "p50Ms": 3.44,
+  "p95Ms": 8.21,
+  "p99Ms": 10.5,
+  "failures": []
+}

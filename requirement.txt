@@ -1,0 +1,570 @@
+# MASTER PROMPT: Build a Production-Oriented Monitoring SaaS
+
+## ROLE
+
+Act as a Principal SaaS Architect, Senior DevOps Engineer, Senior Full-Stack Engineer, SRE, and Application Security Architect.
+
+Help me design and implement a commercial, scalable, multi-tenant observability platform.
+
+Do not immediately generate the entire codebase.
+
+First:
+1. Analyze the requirements.
+2. Propose a modular system architecture.
+3. Identify technical risks and assumptions.
+4. Design the database and APIs.
+5. Define the MVP scope.
+6. Produce a phased implementation plan.
+7. Implement one phase at a time with tests, migrations, documentation, and deployment instructions.
+
+Favor reliable, maintainable, production-oriented solutions over unnecessary complexity.
+
+## 1. PRODUCT VISION
+
+Build a monitoring SaaS for:
+
+- Individual developers
+- Startups with 1–10 servers
+- Mid-sized companies with 10–100 servers
+- Companies running traditional monolithic applications
+- Companies running Docker and Kubernetes
+- Organizations using cloud, on-premises, VPS, dedicated servers, or restricted shared hosting
+
+The SaaS must work with the customer's existing infrastructure wherever technically possible.
+
+Customers must not be required to migrate to Docker or Kubernetes.
+
+Offer two deployment models:
+
+A. Cloud-hosted SaaS
+
+Our company hosts the control plane, telemetry ingestion, dashboards, and storage.
+
+B. Self-hosted
+
+Customers deploy the monitoring data plane in their own infrastructure. Define which control-plane services remain cloud-hosted and how licensing, upgrades, and support work. Also design an optional fully isolated enterprise installation for future development.
+
+## 2. MVP CAPACITY
+
+Initial target:
+
+- 5–10 customers
+- Average 15 servers per customer
+- Average 55 containers per customer
+- Approximately 150 servers and 550 containers at the upper initial target
+
+Architecture must support future horizontal scaling without requiring a full rewrite.
+
+Do not assume a fixed ingestion rate from server count alone.
+
+Create a capacity model based on:
+
+- Metrics samples per second
+- Active time series and cardinality
+- Log GB per day
+- Trace spans per second
+- Sampling rate
+- Data retention
+- Concurrent dashboard queries
+- Active users
+- Tenant quotas
+
+Include load testing and cost estimation.
+
+## 3. TECHNOLOGY STACK
+
+Preferred frontend:
+
+- React
+- JavaScript
+- Vite
+- Tailwind CSS
+- shadcn/ui
+- TanStack Query
+- Recharts or an appropriate visualization library
+
+Preferred backend:
+
+- Node.js
+- JavaScript
+- NestJS or a modular Express architecture
+- PostgreSQL
+- Prisma
+- Redis for cache and distributed coordination
+
+Observability infrastructure:
+
+- OpenTelemetry Collector
+- Prometheus-compatible metrics
+- Grafana Loki
+- Grafana Tempo
+- Grafana for internal operations
+- Object storage for telemetry persistence
+- Grafana Mimir when horizontally scalable, multi-tenant metrics storage becomes necessary
+
+Evaluate Prometheus versus Mimir for MVP and growth.
+
+Use existing standard observability protocols instead of inventing proprietary telemetry formats.
+
+Use Docker Compose for initial deployment and design a Kubernetes migration path.
+
+## 4. SYSTEM ARCHITECTURE
+
+Separate the system into:
+
+### Control Plane
+
+Responsible for:
+
+- Authentication
+- Organization management
+- Team membership and RBAC
+- Subscription management
+- Billing
+- Customer onboarding
+- Agent registration
+- Agent configuration
+- API key management
+- Feature entitlements
+- Usage metering
+- Alert configuration
+- Audit logs
+
+### Data Plane
+
+Responsible for:
+
+- Secure telemetry ingestion
+- Tenant identification
+- Collector authentication
+- Validation and rate limiting
+- Data processing
+- Metrics, logs, and trace storage
+- Tenant-aware querying
+- Retention
+- Quota enforcement
+- Backpressure and retry behavior
+
+Design independent scaling boundaries for both planes.
+
+Never rely on a customer-supplied tenant ID as an authorization mechanism.
+
+## 5. COLLECTOR ONBOARDING
+
+Create an installation wizard.
+
+Customer flow:
+
+1. Register an organization.
+2. Create a project.
+3. Select deployment type.
+4. Choose infrastructure.
+5. Select telemetry capabilities.
+6. Generate a short-lived installation token.
+7. Display an installation command.
+8. Install the collector.
+9. Register the agent.
+10. Validate telemetry ingestion.
+11. Display a live dashboard.
+
+Support:
+
+- Docker
+- Docker Compose
+- Linux systemd
+- Kubernetes Helm
+- Windows service
+- Node.js SDK
+- Python SDK
+- PHP, Java, and .NET instrumentation
+- HTTP/OTLP ingestion for restricted hosting
+
+The installer must:
+
+- Detect operating system and architecture
+- Detect supported container runtimes
+- Check required permissions
+- Identify port conflicts
+- Install appropriate collectors/exporters
+- Configure secure outbound communication
+- Avoid exposing unnecessary inbound ports
+- Register the agent securely
+- Support updates and uninstall
+- Report installation failures clearly
+
+Installation scripts must be versioned, integrity-verifiable, and auditable.
+
+Do not execute downloaded scripts with elevated permissions without an explicit customer confirmation and an inspectable installation alternative.
+
+## 6. MONITORING FEATURES
+
+### Infrastructure Monitoring
+
+Monitor:
+
+- CPU usage
+- RAM usage
+- Disk usage
+- Disk I/O
+- Network traffic
+- Host availability
+- Process health
+
+### Container Monitoring
+
+Monitor:
+
+- Docker container status
+- CPU and memory consumption
+- Container restarts
+- Container logs
+- Kubernetes pods, nodes, and deployments
+
+### Application Monitoring
+
+Monitor:
+
+- HTTP request count
+- Error rate
+- Request duration
+- p50, p95, p99 latency
+- Endpoint performance
+- Distributed traces
+- Application exceptions
+- Service dependencies
+
+### Database Monitoring
+
+Support PostgreSQL, MySQL, SQL Server, and other databases through appropriate exporters and integrations.
+
+Monitor:
+
+- Database availability
+- Connection utilization
+- Query latency
+- Slow queries where permissions allow
+- Resource usage
+- Database-specific health metrics
+
+Never collect query parameter values or sensitive database content by default.
+
+### Uptime Monitoring
+
+Support:
+
+- HTTP/HTTPS checks
+- TCP checks
+- Certificate expiry
+- Configurable check intervals
+- Failure thresholds
+- Multi-region checks in a later phase
+
+## 7. CUSTOMER DASHBOARD
+
+Build a custom React dashboard.
+
+Pages:
+
+1. Overview
+2. Infrastructure
+3. Servers
+4. Containers
+5. Applications
+6. Logs Explorer
+7. Trace Explorer
+8. Database Monitoring
+9. Uptime Monitoring
+10. Alerts
+11. Team and Access
+12. Agent Management
+13. Billing and Usage
+14. Settings
+
+Overview dashboard:
+
+- Total servers
+- Healthy/unhealthy servers
+- Total containers
+- Running/stopped containers
+- Request throughput
+- Error rate
+- p95 latency
+- Recent critical alerts
+- Log ingestion
+- Service availability
+
+Provide filtering by:
+
+- Organization
+- Project
+- Environment
+- Server
+- Service
+- Time range
+
+Provide custom dashboard creation in a later phase.
+
+Grafana should be used for internal monitoring and administration. Customer queries must be mediated by an authorization-aware query service.
+
+## 8. MULTI-TENANT SECURITY
+
+Implement:
+
+- Organization-level isolation
+- Project-level access controls
+- Role-based authorization
+- Tenant-scoped API keys
+- Secure agent enrollment
+- Key rotation and revocation
+- TLS
+- Secret encryption
+- Audit logs
+- Ingestion quotas
+- Query quotas
+- Retention enforcement
+- Sensitive data redaction
+- Secure telemetry label validation
+- Least-privilege service credentials
+
+Never expose raw Prometheus, Loki, or Tempo endpoints to customers.
+
+Ensure all telemetry reads and writes are scoped to authenticated tenant identity.
+
+Design defenses against:
+
+- Cross-tenant data leakage
+- Forged tenant headers
+- High-cardinality abuse
+- Log ingestion floods
+- Expensive queries
+- Token theft
+- Malicious telemetry payloads
+- SSRF through uptime monitors
+
+Add automated cross-tenant security tests.
+
+## 9. DATABASE DESIGN
+
+Use PostgreSQL for SaaS metadata.
+
+Design normalized tables for:
+
+- users
+- organizations
+- organization_members
+- roles
+- permissions
+- projects
+- environments
+- monitored_resources
+- agents
+- agent_credentials
+- agent_enrollment_tokens
+- agent_config_versions
+- subscription_plans
+- plan_features
+- subscriptions
+- billing_customers
+- invoices
+- payments
+- usage_records
+- usage_aggregates
+- alerts
+- alert_rules
+- alert_incidents
+- notification_channels
+- notification_deliveries
+- audit_logs
+
+Include:
+
+- Primary and foreign keys
+- Tenant-scoped indexes
+- Unique constraints
+- Timestamps
+- Soft deletion where appropriate
+- Data retention policies
+- Referential integrity
+- Migration strategy
+
+Do not store raw high-volume logs, metrics, and traces in PostgreSQL.
+
+Use the dedicated observability backends for telemetry.
+
+## 10. SUBSCRIPTIONS AND BILLING
+
+Support:
+
+- Starter
+- Pro
+- Enterprise
+- Custom enterprise contracts
+
+Implement configurable entitlements for:
+
+- Maximum monitored servers
+- Maximum monitored containers or workloads
+- Log ingestion per month
+- Trace ingestion
+- Metrics usage
+- Retention
+- Number of team members
+- Alert rules
+- Notification channels
+- API access
+- Self-hosted licensing
+
+Support:
+
+- Monthly billing
+- Annual billing
+- Free trials
+- Upgrades
+- Downgrades
+- Payment failures
+- Subscription cancellation
+- Grace periods
+- Invoice history
+
+Use a payment-provider abstraction.
+
+For India, evaluate Razorpay. For international customers, evaluate supported global payment providers.
+
+Never trust frontend subscription state.
+
+Enforce entitlements on the backend and at ingestion boundaries.
+
+Webhook processing must be authenticated, idempotent, and retry-safe.
+
+## 11. EMAIL ALERTING
+
+For MVP, support email alerts.
+
+Features:
+
+- CPU thresholds
+- Memory thresholds
+- Disk thresholds
+- Service downtime
+- Container restart thresholds
+- HTTP error-rate thresholds
+- Latency thresholds
+- Database availability
+- Certificate expiration
+
+Implement:
+
+- Alert evaluation
+- Pending and firing states
+- Recovery notifications
+- Deduplication
+- Cooldown periods
+- Notification history
+- Alert grouping
+- Silencing
+- Basic maintenance windows
+
+Avoid alert storms.
+
+## 12. SELF-HOSTED DEPLOYMENT
+
+Support customers that cannot send telemetry to the public cloud.
+
+Design:
+
+- Customer-owned ingestion gateway
+- Local collector deployment
+- Local telemetry storage
+- Local query services
+- Local retention configuration
+- Secure licensing
+- Backup and restore
+- Upgrade procedure
+- Health diagnostics
+
+Document minimum hardware requirements based on measured workload rather than arbitrary fixed numbers.
+
+Support cloud-managed control plane with customer-owned data plane first.
+
+Fully offline enterprise deployments can be developed later.
+
+## 13. SCALABILITY
+
+Design for:
+
+- Horizontal ingestion scaling
+- Stateless APIs
+- Independent query scaling
+- Storage growth
+- Tenant quotas
+- Per-tenant rate limiting
+- Collector buffering
+- Retry with exponential backoff
+- Durable storage
+- Graceful degradation
+- Capacity monitoring
+- Disaster recovery
+
+Do not introduce Kafka, Kubernetes, or distributed databases merely for appearance.
+
+Add infrastructure complexity only when supported by measured scale and reliability requirements.
+
+## 14. QUALITY AND TESTING
+
+Include:
+
+- Unit tests
+- Integration tests
+- API contract tests
+- End-to-end onboarding tests
+- Agent installation tests
+- Billing webhook tests
+- Tenant-isolation tests
+- Load tests
+- Recovery tests
+- Upgrade and rollback tests
+
+Create a test environment simulating 10 organizations with different infrastructures and telemetry volumes.
+
+## 15. DELIVERABLES
+
+Produce:
+
+1. Product requirements document
+2. Architecture decision records
+3. System architecture diagram
+4. Database ER diagram
+5. Prisma schema
+6. API specification
+7. Repository structure
+8. Frontend wireframes
+9. Agent onboarding design
+10. Ingestion and query security model
+11. Billing state machine
+12. Subscription entitlement model
+13. Deployment architecture
+14. Infrastructure sizing model
+15. Phased development roadmap
+16. Testing strategy
+17. Production operations runbook
+
+## 16. IMPLEMENTATION INSTRUCTIONS
+
+Begin with architecture and MVP scoping.
+
+Do not build everything simultaneously.
+
+For each phase:
+
+- Explain the design.
+- List files and modules to create.
+- Implement the functionality.
+- Include configuration examples.
+- Include tests.
+- Document security considerations.
+- Explain deployment.
+- Define acceptance criteria.
+
+Stop after each major phase and wait for my approval before continuing.
+
+Prioritize a usable, secure, measurable MVP for 5–10 pilot customers over an oversized enterprise platform.

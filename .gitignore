@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+frontend/dist/
+backend/data/
+test-results/
+playwright-report/
+*.log
+.npm-cache/
+backend/.env.agent
+.pulse-agent.env
