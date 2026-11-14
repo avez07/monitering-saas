@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
 import { hashPassword, verifyPassword, burnPasswordCheck } from '../lib/crypto.js';
+import { defaultSettings, newConfigId } from '../services/agent-config.js';
 import {
   csrfGuard,
   startSession,
@@ -86,6 +87,13 @@ export function authRoutes(store, limits) {
         slug: 'my-project',
       });
       await tx.create('environment', { orgId: org.id, projectId: project.id, name: 'production' });
+      await tx.create('agentConfig', {
+        id: newConfigId(),
+        orgId: org.id,
+        name: 'Default',
+        isDefault: true,
+        settings: defaultSettings(),
+      });
       await tx.create('subscription', {
         orgId: org.id,
         planId: 'free',

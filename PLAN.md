@@ -267,7 +267,7 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 
 **Phase 0 — Cleanup and security baseline.** Done (in the working tree; commit as the baseline).
 
-**Phase 1 — Account API key, registration and metric storage** (backend only)
+**Phase 1 — Account API key, registration and metric storage** (backend only) — **Done.** Beyond this list: `/api/agent-configs` (create, list, update) lets the wizard save setup profiles later; `DELETE /api/resources/:id` on a server also disconnects its agent; the dashboard's "Connect a server" dialog was adapted to the API key as an interim step until the Phase 5 wizard.
 
 - Add the `ApiKey`, `AgentConfig` and `AgentEvent` models, the Timescale extension, a `server_metrics` hypertable, 5-minute and 1-hour continuous aggregates, and per-plan retention. Drop `AgentEnrollmentToken`.
 - Endpoints:

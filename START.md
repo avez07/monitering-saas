@@ -29,21 +29,24 @@ Open **http://localhost:5173**, choose **Create an account**, and register. You 
 
 ## 3. Connect a server (development agent)
 
-1. Go to **Servers → Connect a server**, choose the project, and click **Generate install command**.
+1. Go to **Servers → Connect a server** and click **Create API key**. This is your one account key: it can connect any number of servers, and it is shown only once.
 2. Run the command shown, in a second terminal at the repository root. It looks like:
 
 ```powershell
-node backend/scripts/agent.mjs --enroll <one-time-token> --api http://localhost:4000
+node backend/scripts/agent.mjs --register --key yk_live_<your-key> --api http://localhost:4000
 ```
 
-3. Within about 30 seconds your computer appears under **Servers** with CPU, memory and disk. The credential is saved in `%USERPROFILE%\.config\yuktiops\agent.env`, not in the project. Later starts only need `npm run agent`.
+3. Within about a minute your computer appears under **Servers** with CPU, memory and disk. The agent saves only its own credential in `%USERPROFILE%\.config\yuktiops\agent.env`, never the account key. Later starts only need `npm run agent`.
+4. To connect a second machine, run the same command there. Running it again on the same machine reconnects the same server instead of adding a duplicate.
 
-The agent refuses to send credentials over plain `http://` unless the server is `localhost`. The one-line installer for real servers comes in Phase 1.
+The free plan allows 2 servers; a third registration is refused with a message to upgrade. The agent refuses to send credentials over plain `http://` unless the server is `localhost`. The one-line installer and Go agent for real servers come in the next phases.
+
+If you lose the key, open **Connect a server** again and choose **Lost it? Regenerate**. New installs then need the new key; servers already connected keep running.
 
 ## 4. Run the automated tests
 
 ```powershell
-npm test            # 24 backend tests on a real PostgreSQL (database yuktiops_test, created automatically)
+npm test            # 41 backend tests on a real PostgreSQL (database yuktiops_test, created automatically)
 npm run build       # production frontend build
 npm run test:ui     # 4 browser tests (Playwright; needs Google Chrome; starts its own API and dashboard)
 ```
@@ -61,7 +64,9 @@ $env:PORT=4001; $env:FRONTEND_PORT=5174; $env:APP_URL="http://localhost:5174"; n
 3. **Account lockout.** Try a wrong password 10 times for one email: the 11th attempt (even with the right password) says too many attempts. Another account still signs in fine.
 4. **No demo login.** `Invoke-RestMethod -Method Post http://localhost:4000/api/auth/demo` returns 401/404, never a login.
 5. **Team page.** **Team & access** has no "Add team member" button. Accounts are no longer created with admin-chosen passwords; invitations arrive in Phase 5.
-6. **Alert notification.** On **Alerts**, add a rule (for example CPU above 1% for 60 seconds) with the agent running. Within about two minutes the incident fires and the message shows under **Alerts → Notification history** (status `local`: with the default `EMAIL_PROVIDER=local` nothing is actually emailed). To see real emails, set `EMAIL_PROVIDER=smtp` in `.env`, restart, and open Mailpit at http://localhost:8025.
+6. **The API key is not kept.** After creating the key, open the dialog again: it shows only `yk_live_xxxx…` and a **Regenerate** button, never the full key. DevTools → Local Storage holds no key, and `agent.env` contains only `AGENT_TOKEN=agent_…`.
+7. **History is stored.** With the agent running for a minute, run `docker compose exec postgres psql -U yuktiops -d yuktiops -c "select count(*) from server_metrics"`: the first row appears within seconds and then one more every 30 seconds, and `select * from server_metrics_5m order by bucket desc limit 3` shows the 5-minute rollup.
+8. **Alert notification.** On **Alerts**, add a rule (for example CPU above 1% for 60 seconds) with the agent running. Within about two minutes the incident fires and the message shows under **Alerts → Notification history** (status `local`: with the default `EMAIL_PROVIDER=local` nothing is actually emailed). To see real emails, set `EMAIL_PROVIDER=smtp` in `.env`, restart, and open Mailpit at http://localhost:8025.
 
 ## 6. Run the full stack in Docker
 

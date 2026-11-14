@@ -1,22 +1,25 @@
 import { useState } from 'react';
-import { Check, Copy, Terminal, Radio, ArrowRight } from 'lucide-react';
-import { useAction, useWorkspace } from '../lib/workspace';
-import { Modal, Field, Select, Button, copy } from './ui';
+import { Check, Copy, Terminal, Radio, ArrowRight, KeyRound } from 'lucide-react';
+import { useAction, useApi, useWorkspace } from '../lib/workspace';
+import { Modal, Field, Input, Button, copy } from './ui';
 
+// Interim dialog: the guided "Add server" wizard replaces it in a later phase.
 export function Onboarding({ open, onOpenChange }) {
   const ws = useWorkspace(),
     action = useAction();
-  const [projectId, setProjectId] = useState(''),
-    [result, setResult] = useState(null),
+  const status = useApi('/api-key', {}, { enabled: open && ws.canAdmin, retry: false });
+  const [key, setKey] = useState(''),
+    [fresh, setFresh] = useState(false),
+    [confirming, setConfirming] = useState(false),
     [step, setStep] = useState(1);
-  const selectedProject = projectId || ws.projects[0]?.id;
-  async function generate() {
+  const existing = status.data?.key;
+  const valid = /^yk_live_[a-f0-9]{64}$/.test(key.trim());
+  const command = `node backend/scripts/agent.mjs --register --key ${key.trim()} --api ${ws.apiPublicUrl}`;
+  async function issue(path) {
     try {
-      const data = await action.mutateAsync({
-        path: '/agents/enrollment-tokens',
-        body: { projectId: selectedProject },
-      });
-      setResult(data);
+      const data = await action.mutateAsync({ path });
+      setKey(data.key);
+      setFresh(true);
       setStep(2);
     } catch {
       /* the error toast is shown by the shared mutation handler */
@@ -25,7 +28,9 @@ export function Onboarding({ open, onOpenChange }) {
   function close(value) {
     onOpenChange(value);
     if (!value) {
-      setResult(null);
+      setKey('');
+      setFresh(false);
+      setConfirming(false);
       setStep(1);
     }
   }
@@ -38,7 +43,7 @@ export function Onboarding({ open, onOpenChange }) {
       wide
     >
       <div className="wizard-steps">
-        {['Choose a project', 'Install the agent', 'Check it is connected'].map((label, i) => (
+        {['Get your API key', 'Install the agent', 'Check it is connected'].map((label, i) => (
           <div key={label} className={step >= i + 1 ? 'active' : ''}>
             <span>{step > i + 1 ? <Check size={13} /> : i + 1}</span>
             {label}
@@ -47,31 +52,78 @@ export function Onboarding({ open, onOpenChange }) {
       </div>
       {step === 1 && (
         <div className="form-stack">
-          <Field label="Project">
-            <Select value={selectedProject || ''} onChange={(e) => setProjectId(e.target.value)}>
-              {ws.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
           <div className="callout">
-            <Radio size={17} />
+            <KeyRound size={17} />
             <p>
-              The agent reports CPU, memory, disk and uptime using outbound HTTPS only. It does not
-              need administrator access.
+              One account API key connects any number of servers. Each server then gets its own
+              credential, so regenerating the key never disconnects servers that are already
+              running.
             </p>
           </div>
-          <div className="form-actions">
-            <Button onClick={generate} loading={action.isPending} disabled={!selectedProject}>
-              Generate install command
-              <ArrowRight size={15} />
-            </Button>
-          </div>
+          {!ws.canAdmin && (
+            <p className="muted">
+              Only an owner or administrator can create the API key. Ask one of them to connect a
+              server.
+            </p>
+          )}
+          {ws.canAdmin && status.isPending && <p className="muted">Checking your API key…</p>}
+          {ws.canAdmin && status.isError && <p className="muted">{status.error.message}</p>}
+          {ws.canAdmin && status.isSuccess && !existing && (
+            <div className="form-actions">
+              <Button onClick={() => issue('/api-key')} loading={action.isPending}>
+                Create API key
+                <ArrowRight size={15} />
+              </Button>
+            </div>
+          )}
+          {ws.canAdmin && existing && (
+            <>
+              <Field
+                label={`Your API key (${existing.prefix}…)`}
+                hint="For safety we only keep a fingerprint of it, so it cannot be shown again. Paste it here to build the command."
+              >
+                <Input
+                  value={key}
+                  placeholder="yk_live_…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+              </Field>
+              <div className="form-actions">
+                {confirming ? (
+                  <>
+                    <span className="muted text-sm">
+                      New installs will need the new key. Servers already connected keep running.
+                    </span>
+                    <Button variant="secondary" onClick={() => setConfirming(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => issue('/api-key/regenerate')}
+                      loading={action.isPending}
+                    >
+                      Regenerate
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="secondary" onClick={() => setConfirming(true)}>
+                      Lost it? Regenerate
+                    </Button>
+                    <Button onClick={() => setStep(2)} disabled={!valid}>
+                      Continue
+                      <ArrowRight size={15} />
+                    </Button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
-      {step === 2 && result && (
+      {step === 2 && (
         <div className="form-stack">
           <div className="callout">
             <Terminal size={18} />
@@ -83,18 +135,17 @@ export function Onboarding({ open, onOpenChange }) {
           <div className="code-block">
             <div>
               <span>TERMINAL · NODE.JS 22+</span>
-              <button
-                aria-label="Copy install command"
-                onClick={() => copy(result.command, ws.notify)}
-              >
+              <button aria-label="Copy install command" onClick={() => copy(command, ws.notify)}>
                 <Copy size={15} />
               </button>
             </div>
-            <pre>{result.command}</pre>
+            <pre>{command}</pre>
           </div>
           <p className="muted text-sm">
-            One-time token · Expires in 15 minutes · The credential is saved in your user config
-            folder, not in the project.
+            {fresh
+              ? 'This key is shown only now — copy it somewhere safe. '
+              : 'Your key is not stored on this page. '}
+            The server saves its own credential in your user config folder, never the account key.
           </p>
           <div className="form-actions">
             <Button variant="secondary" onClick={() => setStep(1)}>

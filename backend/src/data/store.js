@@ -20,6 +20,10 @@ export class PrismaStore {
   remove(table, id) {
     return this.client[table].delete({ where: { id } });
   }
+  /** Update every row matching a Prisma `where`. Returns how many rows changed. */
+  async updateMany(table, where, data) {
+    return (await this.client[table].updateMany({ where, data })).count;
+  }
   /** Delete every row matching a Prisma `where` (including operators such as `{ lt }`). */
   async removeMany(table, where) {
     return (await this.client[table].deleteMany({ where })).count;

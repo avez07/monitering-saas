@@ -17,17 +17,11 @@ import { enforceCount, entitlements, planLimit } from '../services/limits.js';
 import { resolveTarget, checkTarget } from '../services/uptime.js';
 import { evaluateAlerts, deliverNotifications } from '../services/workers.js';
 import { billingProvider } from '../services/billing.js';
+import { revokeAgentAccess } from '../services/agents.js';
 
 const name = z.string().trim().min(2).max(100);
 const id = z.string().min(1).max(100);
 const nullableDate = z.string().datetime().nullable();
-const resourceInput = z.object({
-  name,
-  projectId: id,
-  type: z.enum(['server']),
-  environment: z.string().min(1).max(40).default('production'),
-  labels: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).default({}),
-});
 
 export function controlRoutes(store, limits) {
   const router = Router();
@@ -97,28 +91,15 @@ export function controlRoutes(store, limits) {
       ),
     );
   });
-  router.post('/resources', canEdit, async (req, res) => {
-    const input = resourceInput.parse(req.body);
-    await requireProject(store, req.context, input.projectId);
-    await enforceCount(
-      store,
-      req.context.orgId,
-      'servers',
-      (await store.list('monitoredResource', { orgId: req.context.orgId, type: 'server' })).filter(
-        (r) => !r.deletedAt,
-      ).length,
-    );
-    const row = await store.create('monitoredResource', {
-      ...input,
-      orgId: req.context.orgId,
-      status: 'pending',
-    });
-    await audit(store, req.context, 'resource.created', row.name);
-    res.status(201).json(row);
-  });
+  // Servers are not created by hand: they appear when the agent registers with the account API key.
   router.delete('/resources/:id', canEdit, async (req, res) => {
     const row = await requireRow(store, req.context, 'monitoredResource', req.params.id);
     await store.update('monitoredResource', row.id, { deletedAt: new Date().toISOString() });
+    // Removing a server must also stop its agent from reporting.
+    if (row.type === 'server' && row.agentId) {
+      const agent = await store.find('agent', { id: row.agentId });
+      if (agent) await revokeAgentAccess(store, agent);
+    }
     await audit(store, req.context, 'resource.deleted', row.name);
     res.status(204).end();
   });

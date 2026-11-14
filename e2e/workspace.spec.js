@@ -59,12 +59,23 @@ test('a new customer registers and every page loads, with the session kept out o
   expect(errors).toEqual([]);
 });
 
-test('connecting a server produces an install command with a one-time token', async ({ page }) => {
+test('connecting a server creates the one account API key and builds the install command', async ({
+  page,
+}) => {
   await signIn(page);
   await page.locator('nav').getByRole('link', { name: 'Servers', exact: true }).click();
   await page.getByRole('button', { name: 'Connect a server' }).first().click();
-  await page.getByRole('button', { name: /Generate install command/ }).click();
-  await expect(page.locator('pre')).toContainText(/--enroll enroll_[a-f0-9]{64} --api /);
+  await page.getByRole('button', { name: 'Create API key' }).click();
+  await expect(page.locator('pre')).toContainText(/--register --key yk_live_[a-f0-9]{64} --api /);
+  // The raw key is never kept in browser storage.
+  expect(
+    await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })),
+  ).not.toMatch(/yk_live_/);
+  // Opening the dialog again shows only a prefix and offers to regenerate; it cannot show the key.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Connect a server' }).first().click();
+  await expect(page.getByText(/Your API key \(yk_live_[a-f0-9]{4}…\)/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Lost it? Regenerate' })).toBeVisible();
 });
 
 test('signing out ends the session on the server, not just in the browser', async ({ page }) => {

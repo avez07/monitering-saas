@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { checkTarget } from './uptime.js';
 import { entitlements } from './limits.js';
+import { trimRawMetricsByPlan } from './metrics.js';
 
 export async function enqueueNotifications(store, incident, recovery = false) {
   const org = await store.find('organization', { id: incident.orgId });
@@ -207,15 +208,24 @@ export async function housekeeping(store) {
     for (const table of ['uptimeCheck', 'notificationDelivery'])
       await store.removeMany(table, { orgId: org.id, createdAt });
   }
-  // Expired sessions and used/expired enrollment tokens are useless; remove them in bulk.
+  // Expired sessions are useless; remove them in bulk.
   const now = new Date();
   await store.removeMany('session', {
     OR: [{ expiresAt: { lt: now } }, { revokedAt: { lt: new Date(Date.now() - 7 * 86400000) } }],
   });
-  await store.removeMany('agentEnrollmentToken', {
-    expiresAt: { lt: new Date(Date.now() - 86400000) },
+  // Install steps from a machine that never registered, and old agent events, are only useful briefly.
+  await store.removeMany('agentEvent', {
+    agentId: null,
+    createdAt: { lt: new Date(Date.now() - 7 * 86400000) },
   });
+  await store.removeMany('agentEvent', { createdAt: { lt: new Date(Date.now() - 30 * 86400000) } });
+  // Per-plan raw history limits only need checking occasionally.
+  if (Date.now() - lastMetricTrim > 3600000) {
+    lastMetricTrim = Date.now();
+    await trimRawMetricsByPlan(store);
+  }
 }
+let lastMetricTrim = 0;
 
 export const LEASE_ID = 'main-worker';
 export const LEASE_MS = 90000;

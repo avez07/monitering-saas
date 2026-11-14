@@ -8,7 +8,9 @@ import { errorHandler } from './lib/errors.js';
 import { auth, csrfGuard } from './services/auth.js';
 import { authRoutes } from './routes/auth.js';
 import { controlRoutes } from './routes/control.js';
-import { agentManagementRoutes, enrollmentRoute, heartbeatRoute } from './routes/agents.js';
+import { agentManagementRoutes } from './routes/agents.js';
+import { apiKeyRoutes } from './routes/api-key.js';
+import { v1Routes } from './routes/v1.js';
 import { verifyWebhook, processWebhook } from './services/billing.js';
 
 export function createApp(store, limits) {
@@ -79,16 +81,18 @@ export function createApp(store, limits) {
       }
     },
   );
+  // The agent protocol. Bearer credentials only (no cookies), and gzip bodies are accepted. This runs
+  // before the small default JSON limit because a batch of buffered samples is larger than a form post.
+  app.use('/v1', express.json({ limit: '512kb' }), v1Routes(store, limits));
   app.use(express.json({ limit: '128kb' }));
-  // Browser-facing routes use the session cookie and are CSRF-guarded. Agent routes use bearer credentials.
+  // Browser-facing routes use the session cookie and are CSRF-guarded.
   app.use('/api/auth', authRoutes(store, limits));
-  app.post('/api/agents/enroll', enrollmentRoute(store, limits));
-  app.post('/api/agents/heartbeat', ...heartbeatRoute(store, limits));
   const secured = express.Router();
   secured.use(csrfGuard);
   secured.use(auth(store));
   secured.use(controlRoutes(store, limits));
   secured.use(agentManagementRoutes(store));
+  secured.use(apiKeyRoutes(store));
   app.use('/api', secured);
   app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   if (existsSync(`${root}/frontend/dist/index.html`)) {

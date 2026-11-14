@@ -96,17 +96,18 @@ test('logout-all revokes every session of the user, and expired or idle sessions
 
 test('state-changing requests from another origin, or with no origin, are blocked (CSRF)', async () => {
   const owner = await register(app, 'Csrf');
-  const body = { name: 'forged', projectId: owner.project.id, type: 'server' };
   // The browser would attach the session cookie to a cross-site form post, so reuse the signed-in client.
-  const hostile = await owner.client
-    .post('/api/resources')
-    .set('Origin', 'https://evil.example')
-    .send(body);
+  const hostile = await owner.client.post('/api/api-key').set('Origin', 'https://evil.example');
   assert.equal(hostile.status, 403);
-  const none = await owner.client.post('/api/resources').unset('Origin').send(body);
+  const none = await owner.client.post('/api/api-key').unset('Origin');
   assert.equal(none.status, 403);
+  assert.equal(
+    (await store.list('apiKey', { orgId: owner.orgId })).length,
+    0,
+    'nothing was created',
+  );
   assert.equal((await owner.client.get('/api/resources').unset('Origin')).status, 200);
-  assert.equal((await owner.client.post('/api/resources').send(body)).status, 201);
+  assert.equal((await owner.client.post('/api/api-key')).status, 201);
   // Login CSRF: a foreign origin cannot sign a victim into the attacker's account either.
   const login = await request(app)
     .post('/api/auth/login')
@@ -158,6 +159,13 @@ test('removed endpoints stay removed: demo login, member creation with a passwor
   assert.equal((await owner.client.get('/api/query/metrics')).status, 404);
   assert.equal((await owner.client.get('/api/keys')).status, 404);
   assert.equal((await request(app).post('/otlp/v1/metrics').send({})).status, 404);
+  // Servers appear only when the agent registers with the account API key; the one-time token flow is gone.
+  const manual = await owner.client
+    .post('/api/resources')
+    .send({ name: 'manual', type: 'server', projectId: owner.project.id });
+  assert.equal(manual.status, 404);
+  const retired = ['/api/agents/enrollment-tokens', '/api/agents/enroll', '/api/agents/heartbeat'];
+  for (const path of retired) assert.equal((await owner.client.post(path).send({})).status, 404);
 });
 
 test('security headers are sent and the framework banner is hidden', async () => {
@@ -212,19 +220,19 @@ test('foreign projects, resources, and agents are inaccessible', async () => {
   const a = await register(app, 'Alpha');
   const b = await register(app, 'Beta');
   const resource = await server(a);
-  const create = await b.client
-    .post('/api/resources')
-    .send({ name: 'Forbidden', type: 'server', projectId: a.project.id });
-  assert.equal(create.status, 404);
   assert.equal((await b.client.delete(`/api/resources/${resource.id}`)).status, 404);
-  const token = await a.client
-    .post('/api/agents/enrollment-tokens')
-    .send({ projectId: a.project.id });
-  assert.equal(token.status, 201);
-  const foreignToken = await b.client
-    .post('/api/agents/enrollment-tokens')
-    .send({ projectId: a.project.id });
-  assert.equal(foreignToken.status, 404);
+  const agent = await store.create('agent', {
+    orgId: a.orgId,
+    projectId: a.project.id,
+    name: 'alpha-agent',
+    platform: 'linux',
+    version: '1',
+    status: 'healthy',
+    lastSeen: new Date(),
+  });
+  assert.equal((await b.client.post(`/api/agents/${agent.id}/rotate`)).status, 404);
+  assert.equal((await b.client.post(`/api/agents/${agent.id}/revoke`)).status, 404);
+  assert.equal((await b.client.get('/api/agents')).body.length, 0);
 });
 
 test('viewer roles and assigned project scopes are enforced on the backend', async () => {
@@ -254,20 +262,12 @@ test('viewer roles and assigned project scopes are enforced on the backend', asy
     ['visible-server'],
   );
   assert.equal((await viewer.client.get('/api/members')).status, 403);
+  assert.equal((await viewer.client.get('/api/api-key')).status, 403);
+  assert.equal((await viewer.client.post('/api/api-key')).status, 403);
+  assert.equal((await viewer.client.get('/api/agent-configs')).status, 403);
   assert.equal(
-    (
-      await viewer.client
-        .post('/api/resources')
-        .send({ name: 'no', projectId: owner.project.id, type: 'server' })
-    ).status,
-    403,
-  );
-  assert.equal(
-    (
-      await viewer.client
-        .post('/api/agents/enrollment-tokens')
-        .send({ projectId: owner.project.id })
-    ).status,
+    (await viewer.client.delete(`/api/resources/${(await store.list('monitoredResource'))[0].id}`))
+      .status,
     403,
   );
 });
@@ -300,80 +300,32 @@ test('restricted administrators cannot widen their own access or grant broader m
   assert.equal(permitted.status, 200);
 });
 
-test('enrollment tokens are single-use and credentials can heartbeat, rotate, and revoke', async () => {
-  const owner = await register(app, 'Owner');
-  const enrollment = await owner.client
-    .post('/api/agents/enrollment-tokens')
-    .send({ projectId: owner.project.id });
-  assert.match(enrollment.body.command, /--enroll enroll_[a-f0-9]{64} --api /);
-  const payload = { token: enrollment.body.token, name: 'test-host', platform: 'linux' };
-  const results = await Promise.all([
-    request(app).post('/api/agents/enroll').send(payload),
-    request(app).post('/api/agents/enroll').send(payload),
-  ]);
-  assert.deepEqual(results.map((r) => r.status).sort(), [201, 401]);
-  const enrolled = results.find((r) => r.status === 201).body;
-  const heartbeat = {
-    cpu: 12,
-    memory: 25,
-    disk: 18,
-    cores: 4,
-    ramGb: 16,
-    uptimeSeconds: 100,
-    os: 'Linux',
-  };
-  const beat = (token) =>
-    request(app)
-      .post('/api/agents/heartbeat')
-      .set('Authorization', `Bearer ${token}`)
-      .send(heartbeat);
-  assert.equal((await beat(enrolled.token)).status, 200);
-  const row = await store.find('monitoredResource', { agentId: enrolled.agentId });
-  assert.equal(row.labels.cpu, 12);
-  assert.equal(row.orgId, owner.orgId);
-  const rotated = await owner.client.post(`/api/agents/${enrolled.agentId}/rotate`);
-  assert.equal(rotated.status, 200);
-  assert.equal((await beat(enrolled.token)).status, 401);
-  assert.equal((await beat(rotated.body.token)).status, 200);
-  await owner.client.post(`/api/agents/${enrolled.agentId}/revoke`);
-  assert.equal((await beat(rotated.body.token)).status, 401);
-  // Only the hash of each credential is stored.
-  for (const credential of await store.list('agentCredential'))
-    assert.ok(![enrolled.token, rotated.body.token].includes(credential.tokenHash));
-});
-
-test('the free plan limits servers, website checks and check frequency', async () => {
+test('the free plan limits website checks and check frequency', async () => {
   const owner = await register(app, 'Limits');
-  const add = (name) =>
-    owner.client.post('/api/resources').send({ name, type: 'server', projectId: owner.project.id });
-  assert.equal((await add('one')).status, 201);
-  assert.equal((await add('two')).status, 201);
-  assert.equal((await add('three')).status, 402, 'free plan includes 2 servers');
-  const tooFrequent = await owner.client
-    .post('/api/uptime')
-    .send({
-      name: 'Fast',
-      projectId: owner.project.id,
-      target: 'https://1.1.1.1',
-      intervalSeconds: 60,
-    });
+  const tooFrequent = await owner.client.post('/api/uptime').send({
+    name: 'Fast',
+    projectId: owner.project.id,
+    target: 'https://1.1.1.1',
+    intervalSeconds: 60,
+  });
   assert.equal(tooFrequent.status, 402, 'free plan checks every 5 minutes at most');
-  const fine = await owner.client
-    .post('/api/uptime')
-    .send({
-      name: 'Ok',
-      projectId: owner.project.id,
-      target: 'https://1.1.1.1',
-      intervalSeconds: 300,
-    });
+  const fine = await owner.client.post('/api/uptime').send({
+    name: 'Ok',
+    projectId: owner.project.id,
+    target: 'https://1.1.1.1',
+    intervalSeconds: 300,
+  });
   assert.equal(fine.status, 201);
-  // A paid plan lifts the free-plan server cap (extra servers are billed later)...
+  // An ended subscription cannot add anything.
   const subscription = await store.find('subscription', { orgId: owner.orgId });
-  await store.update('subscription', subscription.id, { planId: 'pro' });
-  assert.equal((await add('three')).status, 201);
-  // ...but an ended subscription cannot add anything.
   await store.update('subscription', subscription.id, { status: 'cancelled' });
-  assert.equal((await add('four')).status, 402, 'a cancelled subscription cannot add resources');
+  const blocked = await owner.client.post('/api/uptime').send({
+    name: 'Late',
+    projectId: owner.project.id,
+    target: 'https://1.1.1.1',
+    intervalSeconds: 300,
+  });
+  assert.equal(blocked.status, 402, 'a cancelled subscription cannot add resources');
 });
 
 test('billing webhooks require signatures and duplicate events have no repeated effects', async () => {

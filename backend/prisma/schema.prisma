@@ -34,6 +34,8 @@ model Organization {
   auditLogs            AuditLog[]
   invoices             Invoice[]
   notificationChannels NotificationChannel[]
+  apiKeys              ApiKey[]
+  agentConfigs         AgentConfig[]
   payments             Payment[]
   uptimeChecks         UptimeCheck[]
   webhookEvents        WebhookEvent[]
@@ -55,21 +57,20 @@ model OrganizationMember {
 }
 
 model Project {
-  id               String                 @id @default(uuid())
-  orgId            String
-  name             String
-  slug             String
-  deletedAt        DateTime?
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-  organization     Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  environments     Environment[]
-  resources        MonitoredResource[]
-  agents           Agent[]
-  credentials      AgentCredential[]
-  enrollmentTokens AgentEnrollmentToken[]
-  alertRules       AlertRule[]
-  uptimeMonitors   UptimeMonitor[]
+  id             String              @id @default(uuid())
+  orgId          String
+  name           String
+  slug           String
+  deletedAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  organization   Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  environments   Environment[]
+  resources      MonitoredResource[]
+  agents         Agent[]
+  credentials    AgentCredential[]
+  alertRules     AlertRule[]
+  uptimeMonitors UptimeMonitor[]
 
   @@unique([orgId, slug])
   @@unique([orgId, id])
@@ -118,12 +119,19 @@ model Agent {
   version     String
   status      String
   lastSeen    DateTime
+  /// SHA-256 of the machine id, so reinstalling on the same machine reconnects the same server.
+  fingerprint String?
+  os          String              @default("")
+  arch        String              @default("")
+  configId    String?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   project     Project             @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
   credentials AgentCredential[]
   resources   MonitoredResource[]
+  events      AgentEvent[]
 
+  @@unique([orgId, fingerprint])
   @@index([orgId, projectId, status])
 }
 
@@ -146,18 +154,79 @@ model AgentCredential {
   @@index([orgId, projectId, kind])
 }
 
-model AgentEnrollmentToken {
-  id        String    @id @default(uuid())
-  orgId     String
-  projectId String
-  tokenHash String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  project   Project   @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+/// The one account key that registers any number of servers. Only a hash is stored; shown once.
+/// The migration adds a partial unique index so an organization has at most one active key.
+model ApiKey {
+  id           String       @id @default(uuid())
+  orgId        String
+  name         String       @default("Account key")
+  prefix       String
+  tokenHash    String       @unique
+  createdById  String
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  @@index([orgId, expiresAt])
+  @@index([orgId, revokedAt])
+}
+
+/// A setup profile ("st_...") the agent pulls. Settings only toggle built-in, read-only collectors.
+/// The migration adds a partial unique index so an organization has at most one default profile.
+model AgentConfig {
+  id           String       @id
+  orgId        String
+  name         String
+  isDefault    Boolean      @default(false)
+  version      Int          @default(1)
+  settings     Json
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+/// Install progress, errors the agent reports, and problems we detect, for the connection page.
+model AgentEvent {
+  id          String   @id @default(uuid())
+  orgId       String
+  agentId     String?
+  fingerprint String?
+  source      String
+  code        String
+  message     String   @default("")
+  details     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  agent       Agent?   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, createdAt])
+  @@index([orgId, fingerprint, createdAt])
+}
+
+/// A TimescaleDB hypertable (created in the migration): one row per agent per sample.
+model ServerMetric {
+  time          DateTime @db.Timestamptz(6)
+  agentId       String   @map("agent_id")
+  orgId         String   @map("org_id")
+  cpuPercent    Float?   @map("cpu_percent")
+  memPercent    Float?   @map("mem_percent")
+  swapPercent   Float?   @map("swap_percent")
+  diskPercent   Float?   @map("disk_percent")
+  load1         Float?
+  load5         Float?
+  load15        Float?
+  netRxBps      Float?   @map("net_rx_bps")
+  netTxBps      Float?   @map("net_tx_bps")
+  diskReadBps   Float?   @map("disk_read_bps")
+  diskWriteBps  Float?   @map("disk_write_bps")
+  uptimeSeconds Float?   @map("uptime_seconds")
+  /// Per-mount, per-interface and top-process detail.
+  details       Json?
+
+  @@id([agentId, time])
+  @@map("server_metrics")
 }
 
 model SubscriptionPlan {
