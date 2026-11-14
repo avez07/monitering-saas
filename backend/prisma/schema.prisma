@@ -16,19 +16,27 @@ model User {
   updatedAt    DateTime             @updatedAt
   memberships  OrganizationMember[]
   auditLogs    AuditLog[]
+  sessions     Session[]
 }
 
 model Organization {
-  id              String               @id @default(uuid())
-  name            String
-  slug            String               @unique
-  settings        Json                 @default("{}")
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  members         OrganizationMember[]
-  projects        Project[]
-  subscription    Subscription?
-  billingCustomer BillingCustomer?
+  id                   String                @id @default(uuid())
+  name                 String
+  slug                 String                @unique
+  settings             Json                  @default("{}")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  members              OrganizationMember[]
+  projects             Project[]
+  subscription         Subscription?
+  billingCustomer      BillingCustomer?
+  alertIncidents       AlertIncident[]
+  auditLogs            AuditLog[]
+  invoices             Invoice[]
+  notificationChannels NotificationChannel[]
+  payments             Payment[]
+  uptimeChecks         UptimeCheck[]
+  webhookEvents        WebhookEvent[]
 }
 
 model OrganizationMember {
@@ -44,34 +52,6 @@ model OrganizationMember {
 
   @@unique([orgId, userId])
   @@index([userId])
-}
-
-model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  permissions RolePermission[]
-}
-
-model Permission {
-  id        String           @id @default(uuid())
-  name      String           @unique
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  roles     RolePermission[]
-}
-
-model RolePermission {
-  id           String     @id @default(uuid())
-  roleId       String
-  permissionId String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@unique([roleId, permissionId])
 }
 
 model Project {
@@ -130,7 +110,7 @@ model MonitoredResource {
 }
 
 model Agent {
-  id          String               @id @default(uuid())
+  id          String              @id @default(uuid())
   orgId       String
   projectId   String
   name        String
@@ -138,12 +118,10 @@ model Agent {
   version     String
   status      String
   lastSeen    DateTime
-  demo        Boolean              @default(false)
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  project     Project              @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  project     Project             @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
   credentials AgentCredential[]
-  configs     AgentConfigVersion[]
   resources   MonitoredResource[]
 
   @@index([orgId, projectId, status])
@@ -182,49 +160,22 @@ model AgentEnrollmentToken {
   @@index([orgId, expiresAt])
 }
 
-model AgentConfigVersion {
-  id        String   @id @default(uuid())
-  orgId     String
-  agentId   String
-  version   Int
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, version])
-  @@index([orgId])
-}
-
 model SubscriptionPlan {
-  id            String         @id
-  name          String
-  price         Int
-  currency      String
-  servers       Int
-  containers    Int
-  logGb         Int
-  traceGb       Int
-  metricsGb     Int
-  members       Int
-  alertRules    Int
-  retentionDays Int
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  subscriptions Subscription[]
-  features      PlanFeature[]
-}
-
-model PlanFeature {
-  id        String           @id @default(uuid())
-  planId    String
-  key       String
-  value     Json
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  plan      SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-
-  @@unique([planId, key])
+  id                      String         @id
+  name                    String
+  priceUsdCents           Int
+  priceInrPaise           Int
+  includedServers         Int
+  extraServerUsdCents     Int
+  extraServerInrPaise     Int
+  monitors                Int
+  minCheckIntervalSeconds Int
+  members                 Int
+  alertRules              Int
+  retentionDays           Int
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  subscriptions           Subscription[]
 }
 
 model Subscription {
@@ -252,67 +203,35 @@ model BillingCustomer {
 }
 
 model Invoice {
-  id          String   @id @default(uuid())
-  orgId       String
-  number      String   @unique
-  amount      Int
-  currency    String
-  status      String
-  provider    String
-  periodStart DateTime
-  periodEnd   DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String       @id @default(uuid())
+  orgId        String
+  number       String       @unique
+  amount       Int
+  currency     String
+  status       String
+  provider     String
+  periodStart  DateTime
+  periodEnd    DateTime
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
 }
 
 model Payment {
-  id         String   @id @default(uuid())
-  orgId      String
-  providerId String   @unique
-  provider   String
-  amount     Int
-  currency   String
-  status     String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id           String       @id @default(uuid())
+  orgId        String
+  providerId   String       @unique
+  provider     String
+  amount       Int
+  currency     String
+  status       String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
-}
-
-model UsageRecord {
-  id        String   @id @default(uuid())
-  orgId     String
-  kind      String
-  bytes     Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([orgId, createdAt])
-}
-
-model UsageAggregate {
-  id        String   @id @default(uuid())
-  orgId     String
-  kind      String
-  period    String
-  bytes     Float
-  requests  Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([orgId, kind, period])
-}
-
-model Alert {
-  id        String   @id @default(uuid())
-  orgId     String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([orgId])
 }
 
 model AlertRule {
@@ -354,20 +273,22 @@ model AlertIncident {
   rule           AlertRule              @relation(fields: [ruleId], references: [id], onDelete: Cascade)
   resource       MonitoredResource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
   deliveries     NotificationDelivery[]
+  organization   Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, projectId, state])
 }
 
 model NotificationChannel {
-  id         String                 @id @default(uuid())
-  orgId      String
-  name       String
-  type       String
-  address    String
-  enabled    Boolean                @default(true)
-  createdAt  DateTime               @default(now())
-  updatedAt  DateTime               @updatedAt
-  deliveries NotificationDelivery[]
+  id           String                 @id @default(uuid())
+  orgId        String
+  name         String
+  type         String
+  address      String
+  enabled      Boolean                @default(true)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  deliveries   NotificationDelivery[]
+  organization Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
 }
@@ -394,26 +315,28 @@ model NotificationDelivery {
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  orgId     String
-  userId    String
-  action    String
-  target    String
-  details   Json     @default("{}")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
+  id           String       @id @default(uuid())
+  orgId        String
+  userId       String
+  action       String
+  target       String
+  details      Json         @default("{}")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
 }
 
 model WebhookEvent {
-  id        String   @id
-  orgId     String
-  type      String
-  payload   Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String       @id
+  orgId        String
+  type         String
+  payload      Json
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
 }
@@ -433,7 +356,6 @@ model UptimeMonitor {
   lastCheckedAt        DateTime?
   nextCheckAt          DateTime?
   certificateExpiresAt DateTime?
-  demo                 Boolean       @default(false)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   project              Project       @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
@@ -454,6 +376,31 @@ model UptimeCheck {
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   monitor              UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  organization         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, monitorId, createdAt])
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  lastUsedAt DateTime  @default(now())
+  revokedAt  DateTime?
+  userAgent  String    @default("")
+  ip         String    @default("")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model WorkerLease {
+  id        String   @id
+  holder    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

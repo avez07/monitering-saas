@@ -1,24 +1,12 @@
 import { useState } from 'react';
-import {
-  Check,
-  Copy,
-  Download,
-  Terminal,
-  Radio,
-  Server,
-  Boxes,
-  Code2,
-  ArrowRight,
-} from 'lucide-react';
+import { Check, Copy, Terminal, Radio, ArrowRight } from 'lucide-react';
 import { useAction, useWorkspace } from '../lib/workspace';
-import { api, download } from '../lib/api';
 import { Modal, Field, Select, Button, copy } from './ui';
 
 export function Onboarding({ open, onOpenChange }) {
   const ws = useWorkspace(),
     action = useAction();
   const [projectId, setProjectId] = useState(''),
-    [platform, setPlatform] = useState('local'),
     [result, setResult] = useState(null),
     [step, setStep] = useState(1);
   const selectedProject = projectId || ws.projects[0]?.id;
@@ -30,7 +18,9 @@ export function Onboarding({ open, onOpenChange }) {
       });
       setResult(data);
       setStep(2);
-    } catch {}
+    } catch {
+      /* the error toast is shown by the shared mutation handler */
+    }
   }
   function close(value) {
     onOpenChange(value);
@@ -43,12 +33,12 @@ export function Onboarding({ open, onOpenChange }) {
     <Modal
       open={open}
       onOpenChange={close}
-      title="Connect your infrastructure"
-      description="A small agent. A clearer picture of your stack."
+      title="Connect a server"
+      description="A small agent that sends measurements out. Nothing needs to listen on your server."
       wide
     >
       <div className="wizard-steps">
-        {['Choose a source', 'Install & connect', 'Verify telemetry'].map((label, i) => (
+        {['Choose a project', 'Install the agent', 'Check it is connected'].map((label, i) => (
           <div key={label} className={step >= i + 1 ? 'active' : ''}>
             <span>{step > i + 1 ? <Check size={13} /> : i + 1}</span>
             {label}
@@ -66,51 +56,16 @@ export function Onboarding({ open, onOpenChange }) {
               ))}
             </Select>
           </Field>
-          <span className="field-label">How would you like to connect?</span>
-          <div className="source-grid">
-            {[
-              {
-                id: 'local',
-                icon: Server,
-                name: 'Local host agent',
-                hint: 'Windows, Linux & macOS',
-              },
-              {
-                id: 'collector',
-                icon: Boxes,
-                name: 'OpenTelemetry',
-                hint: 'Docker, systemd & Kubernetes',
-              },
-              {
-                id: 'sdk',
-                icon: Code2,
-                name: 'Application SDK',
-                hint: 'Node, Python, PHP, Java & .NET',
-              },
-            ].map(({ id, icon: Icon, name, hint }) => (
-              <button
-                key={id}
-                className={`source-option ${platform === id ? 'selected' : ''}`}
-                onClick={() => setPlatform(id)}
-              >
-                <Icon size={24} />
-                <strong>{name}</strong>
-                <span>{hint}</span>
-                {platform === id && <Check className="source-check" size={15} />}
-              </button>
-            ))}
-          </div>
           <div className="callout">
             <Radio size={17} />
             <p>
-              {platform === 'local'
-                ? 'The included Node.js agent reports CPU, memory, uptime, and filesystem utilization through outbound connections. No administrator access is required.'
-                : 'Enroll a host to obtain a project-scoped agent credential, then use the supplied collector config or OTLP endpoint. Additional exporters require installation on your infrastructure.'}
+              The agent reports CPU, memory, disk and uptime using outbound HTTPS only. It does not
+              need administrator access.
             </p>
           </div>
           <div className="form-actions">
             <Button onClick={generate} loading={action.isPending} disabled={!selectedProject}>
-              Generate installation token
+              Generate install command
               <ArrowRight size={15} />
             </Button>
           </div>
@@ -121,8 +76,8 @@ export function Onboarding({ open, onOpenChange }) {
           <div className="callout">
             <Terminal size={18} />
             <p>
-              From the project root, inspect <code>backend/scripts/agent.mjs</code> and run the
-              command below. It saves the agent credential to your local <code>.env</code>.
+              Development build: from the project folder, run the command below in a terminal. The
+              one-line installer for any Linux server arrives with the production agent.
             </p>
           </div>
           <div className="code-block">
@@ -138,19 +93,9 @@ export function Onboarding({ open, onOpenChange }) {
             <pre>{result.command}</pre>
           </div>
           <p className="muted text-sm">
-            One-time token · Expires in 15 minutes · No elevated permissions
+            One-time token · Expires in 15 minutes · The credential is saved in your user config
+            folder, not in the project.
           </p>
-          <div className="endpoint-box">
-            <span>OTLP/HTTP endpoint</span>
-            <code>{ws.apiPublicUrl}/otlp</code>
-          </div>
-          {platform !== 'local' && (
-            <p className="muted text-sm">
-              After enrollment, open the agent’s menu to download its collector configuration. Put
-              the credential from .env into PULSE_AGENT_TOKEN in the collector environment. SDK
-              setup examples are in docs/AGENTS.md.
-            </p>
-          )}
           <div className="form-actions">
             <Button variant="secondary" onClick={() => setStep(1)}>
               Back
@@ -169,24 +114,16 @@ export function Onboarding({ open, onOpenChange }) {
           </div>
           <h3 className="text-center">Let’s make sure you’re connected.</h3>
           <p className="muted text-center">
-            Agents send a heartbeat every 30 seconds. Open Agent management and look for your
-            hostname with a recent heartbeat.
+            The agent reports every 30 seconds. Open the Servers page and look for your hostname.
           </p>
-          <div className="callout">
-            <Check size={18} />
-            <p>
-              In demo mode, host measurements are saved to inventory. OTLP payloads are acknowledged
-              and discarded. Switch to connected mode to store and explore live telemetry.
-            </p>
-          </div>
           <div className="form-actions">
             <Button
               onClick={() => {
                 close(false);
-                window.location.assign('/agents');
+                window.location.assign('/servers');
               }}
             >
-              Open agent management
+              Open servers
               <ArrowRight size={15} />
             </Button>
           </div>

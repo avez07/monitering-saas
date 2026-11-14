@@ -9,32 +9,43 @@ const schema = z.object({
   PORT: z.coerce.number().default(4000),
   APP_URL: z.string().url().default('http://localhost:5173'),
   API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
-  DEMO_MODE: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
-  DEMO_EMAIL: z.string().email().default('demo@pulse.local'),
-  DEMO_PASSWORD: z.string().min(10),
-  JWT_SECRET: z.string().min(32),
-  DATABASE_URL: z.string().optional(),
-  REDIS_URL: z.string().optional(),
-  MIMIR_URL: z.string().url().default('http://localhost:9009'),
-  LOKI_URL: z.string().url().default('http://localhost:3100'),
-  TEMPO_URL: z.string().url().default('http://localhost:3200'),
-  TEMPO_OTLP_URL: z.string().url().default('http://localhost:4318'),
+  // Express "trust proxy" value: a hop count ("1"), "loopback", or a comma-separated list of CIDRs.
+  TRUST_PROXY: z.string().default('loopback'),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required.'),
   BILLING_PROVIDER: z.enum(['mock']).default('mock'),
   BILLING_WEBHOOK_SECRET: z.string().min(20),
   EMAIL_PROVIDER: z.enum(['local', 'smtp']).default('local'),
-  EMAIL_FROM: z.string().email().default('alerts@pulse.local'),
+  EMAIL_FROM: z.string().email().default('alerts@yuktiops.com'),
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
-  INGEST_BYTES_PER_MINUTE: z.coerce.number().default(10485760),
-  QUERY_REQUESTS_PER_MINUTE: z.coerce.number().default(120),
   WORKER_INTERVAL_MS: z.coerce.number().default(30000),
 });
-export const config = schema.parse(process.env);
-if (config.NODE_ENV === 'production' && (config.DEMO_MODE || config.JWT_SECRET.includes('dummy'))) {
-  throw new Error('Production requires DEMO_MODE=false and a non-dummy JWT_SECRET.');
+
+/** Parse and validate environment variables. Exported so production rules can be tested. */
+export function loadConfig(env = process.env) {
+  const parsed = schema.parse(env);
+  if (parsed.NODE_ENV === 'production') {
+    const problems = [];
+    if (!parsed.APP_URL.startsWith('https://')) problems.push('APP_URL must use https.');
+    if (!parsed.API_PUBLIC_URL.startsWith('https://'))
+      problems.push('API_PUBLIC_URL must use https.');
+    if (/dummy|change-me|example|local/i.test(parsed.BILLING_WEBHOOK_SECRET))
+      problems.push('BILLING_WEBHOOK_SECRET must be a real random secret.');
+    if (/dummy|local/i.test(parsed.DATABASE_URL))
+      problems.push('DATABASE_URL must not use the local dummy credentials.');
+    if (problems.length) throw new Error(`Unsafe production configuration: ${problems.join(' ')}`);
+  }
+  return parsed;
+}
+
+export const config = loadConfig();
+
+/** Express accepts numbers, booleans, or strings for "trust proxy"; env values are always strings. */
+export function trustProxyValue(value = config.TRUST_PROXY) {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value.includes(',') ? value.split(',').map((v) => v.trim()) : value;
 }

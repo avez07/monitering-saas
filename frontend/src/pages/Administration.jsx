@@ -2,22 +2,18 @@ import { useState } from 'react';
 import {
   Plus,
   Users,
-  UserPlus,
   Trash2,
   Shield,
   Check,
   ArrowUpRight,
   Download,
   CreditCard,
-  KeyRound,
-  Copy,
   Mail,
   Settings,
   Folder,
   Clock3,
   Globe,
   FileText,
-  Ban,
   CheckCircle2,
 } from 'lucide-react';
 import { useApi, useWorkspace, useAction, formatNumber, formatDate } from '../lib/workspace';
@@ -28,7 +24,6 @@ import {
   Card,
   CardHeader,
   DataTable,
-  Modal,
   FormModal,
   PageHeader,
   QueryState,
@@ -37,26 +32,28 @@ import {
   Field,
   Input,
   Select,
-  Progress,
-  copy,
 } from '../components/ui';
+
+const usd = (cents) => `${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+const inr = (paise) => `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 export function TeamPage() {
   const ws = useWorkspace(),
     query = useApi('/members'),
-    action = useAction(),
-    [create, setCreate] = useState(false);
+    action = useAction();
   return (
     <>
       <PageHeader
         title="Team & access"
         description="The right people. The right access. One shared picture."
-      >
-        <Button onClick={() => setCreate(true)}>
-          <UserPlus size={16} />
-          Add team member
-        </Button>
-      </PageHeader>
+      />
+      <div className="callout">
+        <Shield size={18} />
+        <p>
+          Email invitations are coming soon. Until then, new team members cannot be added, because
+          we never create accounts or set passwords on someone’s behalf.
+        </p>
+      </div>
       <div className="team-summary">
         <span className="team-avatar-group">
           {(query.data || []).slice(0, 5).map((m, i) => (
@@ -171,7 +168,7 @@ export function TeamPage() {
       <div className="role-cards">
         {[
           { role: 'Owner', description: 'Workspace, billing, team, and all monitoring controls.' },
-          { role: 'Admin', description: 'Team, settings, keys, and monitoring. View billing.' },
+          { role: 'Admin', description: 'Team, settings, and monitoring. View billing.' },
           { role: 'Editor', description: 'Resources, agents, alerts, and uptime monitors.' },
           { role: 'Viewer', description: 'Read-only access to assigned monitoring projects.' },
         ].map((r) => (
@@ -182,47 +179,6 @@ export function TeamPage() {
           </Card>
         ))}
       </div>
-      <FormModal
-        open={create}
-        onOpenChange={setCreate}
-        title="Add team member"
-        description="Create an account or add an existing Pulse user. No invitation email is sent."
-        loading={action.isPending}
-        submitLabel="Add member"
-        onSubmit={(body) => {
-          const { projectId, password, ...rest } = body;
-          return action.mutateAsync({
-            path: '/members',
-            body: {
-              ...rest,
-              ...(password ? { password } : {}),
-              projectIds: projectId ? [projectId] : [],
-            },
-          });
-        }}
-        fields={[
-          { name: 'name', label: 'Full name', placeholder: 'Jordan Lee' },
-          { name: 'email', label: 'Email', type: 'email', placeholder: 'jordan@company.com' },
-          {
-            name: 'password',
-            label: 'Initial password',
-            type: 'password',
-            required: false,
-            minLength: 10,
-            hint: 'Required for new accounts. Share it with your teammate directly.',
-          },
-          { name: 'role', label: 'Role', options: ['viewer', 'editor', 'admin'] },
-          {
-            name: 'projectId',
-            label: 'Project access',
-            options: [
-              { value: '', label: 'All projects' },
-              ...ws.projects.map((p) => ({ value: p.id, label: p.name })),
-            ],
-            required: false,
-          },
-        ]}
-      />
     </>
   );
 }
@@ -240,15 +196,14 @@ export function BillingPage() {
       <div className="billing-notice">
         <CreditCard size={18} />
         <p>
-          <strong>Simulated billing is enabled.</strong> Plan changes and invoices are for local
-          testing. No payment method is connected and no money is charged.
+          <strong>Billing is not live yet.</strong> You can try plan changes, but no payment method
+          is connected and no money is charged.
         </p>
         <Badge>Mock provider</Badge>
       </div>
       <QueryState query={query}>
         {(data) => {
           const current = data.plans.find((p) => p.id === data.subscription.planId);
-          const period = new Date().toISOString().slice(0, 7);
           return (
             <>
               <Card className="current-plan">
@@ -266,14 +221,14 @@ export function BillingPage() {
                   </p>
                 </div>
                 <div className="plan-price">
-                  ₹{formatNumber(current.price)}
-                  <small>/ month equivalent</small>
+                  {usd(current.priceUsdCents)}
+                  <small>/ month · {inr(current.priceInrPaise)} in India</small>
                 </div>
               </Card>
               <div className="section-heading">
                 <div>
                   <h2>A plan for your next chapter</h2>
-                  <p>Illustrative pilot prices in INR, before taxes.</p>
+                  <p>Per server pricing with a free plan. Taxes are added at checkout.</p>
                 </div>
                 <div className="segmented">
                   <button
@@ -293,18 +248,24 @@ export function BillingPage() {
               <div className="plan-grid">
                 {data.plans.map((p) => (
                   <Card key={p.id} className={`plan-card ${p.id === 'pro' ? 'featured' : ''}`}>
-                    {p.id === 'pro' && <span className="plan-recommended">ROOM TO GROW</span>}
+                    {p.id === 'pro' && <span className="plan-recommended">MOST POPULAR</span>}
                     <span className="plan-name">{p.name}</span>
                     <p>
-                      {p.id === 'starter'
-                        ? 'For small stacks with big ideas.'
-                        : p.id === 'pro'
-                          ? 'For teams shipping every day.'
-                          : 'For a bigger view of your business.'}
+                      {
+                        {
+                          free: 'Try it on a couple of servers.',
+                          starter: 'For a small startup.',
+                          pro: 'For teams shipping every day.',
+                          business: 'For a larger fleet.',
+                        }[p.id]
+                      }
                     </p>
                     <div className="plan-price">
-                      ₹{formatNumber(interval === 'annual' ? p.price * 10 : p.price)}
-                      <small>/{interval === 'annual' ? 'year' : 'month'}</small>
+                      {usd(interval === 'annual' ? p.priceUsdCents * 10 : p.priceUsdCents)}
+                      <small>
+                        /{interval === 'annual' ? 'year' : 'month'} ·{' '}
+                        {inr(interval === 'annual' ? p.priceInrPaise * 10 : p.priceInrPaise)}
+                      </small>
                     </div>
                     <Button
                       variant={p.id === 'pro' ? 'default' : 'secondary'}
@@ -324,17 +285,17 @@ export function BillingPage() {
                       interval === data.subscription.interval &&
                       !data.subscription.cancelAtPeriodEnd
                         ? 'Current plan'
-                        : `Simulate ${p.name} plan`}
+                        : `Try ${p.name} plan`}
                     </Button>
                     <ul>
                       {[
-                        `${p.servers} monitored servers`,
-                        `${p.containers} containers`,
-                        `${p.logGb} GB logs / month`,
-                        `${p.traceGb} GB traces / month`,
-                        `${p.metricsGb} GB metrics / month`,
-                        `${p.retentionDays}-day retention entitlement`,
-                        `${p.members} team members`,
+                        `${p.includedServers} servers included`,
+                        p.extraServerUsdCents
+                          ? `Extra servers ${usd(p.extraServerUsdCents)} / ${inr(p.extraServerInrPaise)} each`
+                          : 'No extra servers',
+                        `${p.monitors} website checks (every ${p.minCheckIntervalSeconds >= 60 ? `${p.minCheckIntervalSeconds / 60} min` : `${p.minCheckIntervalSeconds}s`})`,
+                        `${p.retentionDays}-day history`,
+                        `${p.members} team ${p.members === 1 ? 'member' : 'members'}`,
                         `${p.alertRules} alert rules`,
                       ].map((f) => (
                         <li key={f}>
@@ -348,33 +309,20 @@ export function BillingPage() {
               </div>
               <div className="two-col billing-bottom">
                 <Card>
-                  <CardHeader
-                    title="This month’s usage"
-                    subtitle="Accepted payload bytes, before storage compression"
-                  />
-                  <div className="usage-list">
-                    {[
-                      { key: 'logs', label: 'Log ingestion', max: current.logGb },
-                      { key: 'traces', label: 'Trace ingestion', max: current.traceGb },
-                      { key: 'metrics', label: 'Metrics ingestion', max: current.metricsGb },
-                    ].map((u) => {
-                      const value =
-                        data.usage
-                          .filter((r) => r.kind === u.key && r.period === period)
-                          .reduce((a, r) => a + r.bytes, 0) /
-                        1024 ** 3;
-                      return (
-                        <div key={u.key}>
-                          <span>
-                            {u.label}
-                            <strong>
-                              {value.toFixed(3)} / {u.max} GB
-                            </strong>
-                          </span>
-                          <Progress value={(value / u.max) * 100} />
-                        </div>
-                      );
-                    })}
+                  <CardHeader title="Your plan limits" subtitle="Enforced on the server" />
+                  <div className="subscription-details">
+                    <div>
+                      <span>Servers included</span>
+                      <strong>{current.includedServers}</strong>
+                    </div>
+                    <div>
+                      <span>Website checks</span>
+                      <strong>{current.monitors}</strong>
+                    </div>
+                    <div>
+                      <span>Alert rules</span>
+                      <strong>{current.alertRules}</strong>
+                    </div>
                   </div>
                 </Card>
                 <Card>
@@ -393,7 +341,7 @@ export function BillingPage() {
                     </div>
                     <div>
                       <span>Payment provider</span>
-                      <strong>Mock · Local simulation</strong>
+                      <strong>Not connected yet</strong>
                     </div>
                     {ws.role === 'owner' && (
                       <Button
@@ -418,7 +366,7 @@ export function BillingPage() {
                 <DataTable
                   rows={data.invoices}
                   emptyTitle="Your invoice history starts here"
-                  emptyDescription="Simulate a subscription change to generate a demo invoice."
+                  emptyDescription="Try a plan change to generate a simulated invoice."
                   columns={[
                     {
                       key: 'number',
@@ -431,7 +379,11 @@ export function BillingPage() {
                       ),
                     },
                     { key: 'createdAt', label: 'Date', render: (r) => formatDate(r.createdAt) },
-                    { key: 'amount', label: 'Amount', render: (r) => `₹${formatNumber(r.amount)}` },
+                    {
+                      key: 'amount',
+                      label: 'Amount',
+                      render: (r) => (r.currency === 'INR' ? inr(r.amount) : usd(r.amount)),
+                    },
                     { key: 'status', label: 'Status', render: (r) => <Badge status={r.status} /> },
                     {
                       key: 'download',
@@ -468,10 +420,8 @@ export function SettingsPage() {
   const ws = useWorkspace(),
     action = useAction(),
     [tab, setTab] = useState('workspace'),
-    [modal, setModal] = useState(null),
-    [secret, setSecret] = useState(null);
+    [modal, setModal] = useState(null);
   const settings = useApi('/settings'),
-    keys = useApi('/keys'),
     audit = useApi('/audit'),
     notifications = useApi('/notifications'),
     environments = useApi('/environments');
@@ -504,15 +454,6 @@ export function SettingsPage() {
         { name: 'projectId', label: 'Project', options: projectOptions },
       ],
     },
-    key: {
-      title: 'Create ingestion API key',
-      path: '/keys',
-      description: 'This key can send telemetry to one project. It cannot query data.',
-      fields: [
-        { name: 'name', label: 'Key name', placeholder: 'Production SDK' },
-        { name: 'projectId', label: 'Project', options: projectOptions },
-      ],
-    },
     channel: {
       title: 'Add email channel',
       path: '/notifications/channels',
@@ -534,7 +475,6 @@ export function SettingsPage() {
         tabs={[
           { value: 'workspace', label: 'Workspace' },
           { value: 'projects', label: 'Projects & environments' },
-          { value: 'keys', label: 'API keys' },
           { value: 'notifications', label: 'Notifications' },
           { value: 'audit', label: 'Audit log' },
         ]}
@@ -686,65 +626,6 @@ export function SettingsPage() {
           </Card>
         </div>
       )}
-      {tab === 'keys' && (
-        <Card>
-          <CardHeader
-            title="Ingestion API keys"
-            subtitle="Project-scoped credentials for OTLP producers"
-          >
-            <Button size="sm" onClick={() => setModal('key')}>
-              <Plus size={14} />
-              Create key
-            </Button>
-          </CardHeader>
-          <QueryState query={keys}>
-            <DataTable
-              rows={keys.data}
-              emptyTitle="No API keys yet"
-              emptyDescription="Create a key for an application SDK or collector."
-              columns={[
-                {
-                  key: 'name',
-                  label: 'Name',
-                  render: (r) => (
-                    <span className="icon-label">
-                      <KeyRound size={16} />
-                      <strong>{r.name}</strong>
-                    </span>
-                  ),
-                },
-                { key: 'prefix', label: 'Key prefix', render: (r) => <code>{r.prefix}…</code> },
-                {
-                  key: 'projectId',
-                  label: 'Project',
-                  render: (r) => ws.projects.find((p) => p.id === r.projectId)?.name,
-                },
-                {
-                  key: 'revokedAt',
-                  label: 'Status',
-                  render: (r) => <Badge status={r.revokedAt ? 'revoked' : 'active'} />,
-                },
-                {
-                  key: 'actions',
-                  label: '',
-                  sortable: false,
-                  render: (r) => (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={!!r.revokedAt}
-                      onClick={() => action.mutate({ path: `/keys/${r.id}`, method: 'DELETE' })}
-                    >
-                      <Ban size={14} />
-                      Revoke
-                    </Button>
-                  ),
-                },
-              ]}
-            />
-          </QueryState>
-        </Card>
-      )}
       {tab === 'notifications' && (
         <Card>
           <CardHeader
@@ -835,30 +716,11 @@ export function SettingsPage() {
           {...definitions[modal]}
           loading={action.isPending}
           onSubmit={async (body) => {
-            const result = await action.mutateAsync({ path: definitions[modal].path, body });
-            if (result.token) setSecret(result.token);
-            else ws.notify('Saved successfully.');
+            await action.mutateAsync({ path: definitions[modal].path, body });
+            ws.notify('Saved successfully.');
           }}
         />
       )}
-      <Modal
-        open={!!secret}
-        onOpenChange={(v) => !v && setSecret(null)}
-        title="Save your API key"
-        description="This is the only time the full key is shown. Store it in your application’s .env file."
-      >
-        <div className="secret-value">
-          <code>{secret}</code>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Copy API key"
-            onClick={() => copy(secret, ws.notify)}
-          >
-            <Copy size={16} />
-          </Button>
-        </div>
-      </Modal>
     </>
   );
 }

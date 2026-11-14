@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, ArrowRight, Check, Layers3, Terminal } from 'lucide-react';
+import { Activity, ArrowRight, Server, Bell } from 'lucide-react';
 import { api, session } from '../lib/api';
 import { useApi } from '../lib/workspace';
 import { Button, Field, Input } from '../components/ui';
@@ -9,7 +9,7 @@ export function AuthPage({ onSuccess }) {
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const settings = useApi('/auth/config');
-  async function submit(event, demo = false) {
+  async function submit(event) {
     event?.preventDefault();
     setBusy(true);
     setError('');
@@ -18,11 +18,8 @@ export function AuthPage({ onSuccess }) {
         event?.currentTarget instanceof HTMLFormElement
           ? Object.fromEntries(new FormData(event.currentTarget))
           : undefined;
-      const result = await api(demo ? '/auth/demo' : register ? '/auth/register' : '/auth/login', {
-        method: 'POST',
-        body,
-      });
-      session.token = result.token;
+      // The server sets an httpOnly session cookie; nothing secret is kept in page storage.
+      await api(register ? '/auth/register' : '/auth/login', { method: 'POST', body });
       session.org = null;
       onSuccess();
     } catch (error) {
@@ -38,23 +35,23 @@ export function AuthPage({ onSuccess }) {
           <span className="brand-icon">
             <Activity size={23} />
           </span>
-          pulse<span className="brand-dot">.</span>
+          yukti<span className="brand-dot">ops</span>
         </a>
         <div className="auth-story-content">
-          <span className="eyebrow">A LITTLE CLARITY. A LOT OF CONFIDENCE.</span>
+          <span className="eyebrow">SIMPLE SERVER MONITORING</span>
           <h1>
-            Your entire stack.
+            Know when your server
             <br />
-            <em>One clear picture.</em>
+            <em>needs you.</em>
           </h1>
-          <p>Know what’s happening, find what matters, and get back to building.</p>
+          <p>Servers and websites, watched around the clock. Set up in under two minutes.</p>
           <div className="auth-feature">
-            <Layers3 size={20} />
-            <span>Infrastructure to application. All connected.</span>
+            <Server size={20} />
+            <span>CPU, memory, disk and uptime for every server.</span>
           </div>
           <div className="auth-feature">
-            <Terminal size={20} />
-            <span>Metrics, logs, and traces in one workspace.</span>
+            <Bell size={20} />
+            <span>Alerts by email before your customers notice.</span>
           </div>
           <div className="auth-visual">
             <div className="auth-visual-top">
@@ -89,14 +86,14 @@ export function AuthPage({ onSuccess }) {
       <div className="auth-form-wrap">
         <div className="auth-form">
           <div className="auth-mini-brand">
-            <Activity /> pulse.
+            <Activity /> yuktiops
           </div>
           <span className="eyebrow">YOUR MONITORING WORKSPACE</span>
           <h2>{register ? 'Make room for clarity.' : 'Welcome back.'}</h2>
           <p>
             {register
-              ? 'Create your workspace. Start with a 14-day trial.'
-              : 'A good day starts with a healthy stack.'}
+              ? 'Create your workspace. The free plan includes 2 servers.'
+              : 'Sign in to see how your servers are doing.'}
           </p>
           <form onSubmit={submit}>
             {register && (
@@ -144,26 +141,8 @@ export function AuthPage({ onSuccess }) {
               <ArrowRight size={16} />
             </Button>
           </form>
-          {settings.data?.demo && (
-            <>
-              <div className="divider-label">
-                <span>or take a look around</span>
-              </div>
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={() => submit(null, true)}
-                loading={busy}
-              >
-                Explore the demo workspace <ArrowRight size={15} />
-              </Button>
-              <p className="demo-login-note">
-                <Check size={13} /> Sample data. No external accounts needed.
-              </p>
-            </>
-          )}
           <p className="auth-switch">
-            {register ? 'Already have a workspace?' : 'New to Pulse?'}{' '}
+            {register ? 'Already have a workspace?' : 'New to YuktiOps?'}{' '}
             <button
               onClick={() => {
                 setRegister(!register);

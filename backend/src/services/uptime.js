@@ -6,7 +6,9 @@ import { assert } from '../lib/errors.js';
 
 export function isPublicAddress(address) {
   if (isIP(address) === 6)
-    return /^[23][0-9a-f]{3}:/i.test(address) && !/^2001:(db8|0*0):/i.test(address);
+    // Global unicast only. Exclude documentation (2001:db8), Teredo (2001:0::/32) and 6to4 (2002::/16),
+    // which can embed or tunnel to private IPv4 addresses.
+    return /^[23][0-9a-f]{3}:/i.test(address) && !/^(2001:(db8|0*0):|2002:)/i.test(address);
   if (isIP(address) !== 4) return false;
   const [a, b, c] = address.split('.').map(Number);
   return !(
@@ -73,7 +75,7 @@ export async function checkTarget(target) {
             options?.all
               ? callback(null, [address])
               : callback(null, address.address, address.family),
-          headers: { 'user-agent': 'PulseUptime/0.1', range: 'bytes=0-1023' },
+          headers: { 'user-agent': 'YuktiOpsUptime/0.1', range: 'bytes=0-1023' },
         },
         (response) => {
           const certificate = response.socket.getPeerCertificate?.();

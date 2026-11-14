@@ -9,4 +9,3 @@ playwright-report/
 *.log
 .npm-cache/
 backend/.env.agent
-.pulse-agent.env

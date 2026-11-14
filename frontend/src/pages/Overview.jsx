@@ -1,65 +1,29 @@
 import { Link } from 'react-router-dom';
 import {
   Server,
-  Boxes,
-  Activity,
+  Globe,
   TriangleAlert,
   Plus,
   ArrowUpRight,
-  Clock3,
   ChevronRight,
   Check,
-  AppWindow,
-  Globe,
   Zap,
+  ServerOff,
 } from 'lucide-react';
-import { useApi, useWorkspace, formatNumber, relativeTime } from '../lib/workspace';
+import { useApi, useWorkspace, relativeTime } from '../lib/workspace';
 import {
   Badge,
   Button,
   Card,
   CardHeader,
   StatCard,
-  MetricChart,
   PageHeader,
-  Select,
   QueryState,
   DataTable,
   Progress,
   Empty,
 } from '../components/ui';
 
-function ChartPanel({ metric, title, color, unit, subtitle }) {
-  const ws = useWorkspace();
-  const query = useApi(
-    '/query/metrics',
-    { projectId: ws.filters.projectId, range: ws.filters.range, metric },
-    { refetchInterval: 30000 },
-  );
-  const last = query.data?.points?.at(-1)?.value;
-  return (
-    <Card className="chart-card">
-      <CardHeader title={title} subtitle={subtitle}>
-        <div className="chart-current">
-          {last == null ? '—' : formatNumber(last, 1)}
-          <small>{unit}</small>
-        </div>
-      </CardHeader>
-      <div className="chart-legend">
-        <i style={{ background: color }} />
-        {metric === 'cpu'
-          ? 'CPU utilization'
-          : metric === 'memory'
-            ? 'Memory utilization'
-            : 'Requests per second'}
-        <span>Average across selected project</span>
-      </div>
-      <QueryState query={query}>
-        {(data) => <MetricChart points={data.points} color={color} unit={unit} />}
-      </QueryState>
-    </Card>
-  );
-}
 export function Overview() {
   const ws = useWorkspace();
   const query = useApi(
@@ -70,25 +34,12 @@ export function Overview() {
   return (
     <>
       <PageHeader
-        title="Workspace overview"
-        description="Your stack at a glance. Everything that matters, in one place."
+        title="Overview"
+        description="Your servers and websites at a glance. Everything that matters, in one place."
       >
-        <div className="time-select">
-          <Clock3 size={15} />
-          <Select
-            aria-label="Time range"
-            value={ws.filters.range}
-            onChange={(e) => ws.setRange(e.target.value)}
-          >
-            <option value="15m">Last 15 minutes</option>
-            <option value="1h">Last 1 hour</option>
-            <option value="6h">Last 6 hours</option>
-            <option value="24h">Last 24 hours</option>
-          </Select>
-        </div>
         <Button onClick={ws.openOnboarding} disabled={!ws.canEdit}>
           <Plus size={16} />
-          Connect source
+          Connect a server
         </Button>
       </PageHeader>
       <QueryState query={query}>
@@ -101,17 +52,17 @@ export function Overview() {
               <div>
                 <strong>
                   {data.incidents.length
-                    ? 'Your stack needs a little attention'
+                    ? 'Something needs your attention'
                     : data.servers
-                      ? 'Looking good. Your stack is healthy.'
+                      ? 'Looking good. Everything is healthy.'
                       : 'Your workspace is ready to connect.'}
                 </strong>
                 <p>
                   {data.incidents.length
-                    ? `${data.incidents.length} active ${data.incidents.length === 1 ? 'incident' : 'incidents'} across your workspace. Everything else is running smoothly.`
+                    ? `${data.incidents.length} active ${data.incidents.length === 1 ? 'incident' : 'incidents'}. Everything else is running smoothly.`
                     : data.servers
-                      ? 'Your connected resources are reporting healthy status.'
-                      : 'Install an agent to start monitoring your infrastructure.'}
+                      ? 'Your connected servers are reporting healthy status.'
+                      : 'Connect a server to start monitoring it.'}
                 </p>
               </div>
               <Link to="/alerts">
@@ -121,7 +72,7 @@ export function Overview() {
             </div>
             <div className="stats-grid">
               <StatCard
-                title="Monitored servers"
+                title="Servers"
                 value={data.servers}
                 icon={Server}
                 seed={1}
@@ -134,34 +85,27 @@ export function Overview() {
                 }
               />
               <StatCard
-                title="Containers"
-                value={data.containers}
-                icon={Boxes}
+                title="Servers offline"
+                value={data.offlineServers}
+                icon={ServerOff}
                 seed={3}
-                tone="blue"
+                tone="amber"
                 detail={
-                  <>
-                    <i className="status-dot" />
-                    {data.runningContainers} running{' '}
-                    <span className="muted">across your hosts</span>
-                  </>
+                  data.warningServers
+                    ? `${data.warningServers} more under heavy load`
+                    : 'No servers under heavy load'
                 }
               />
               <StatCard
-                title="Request throughput"
-                value={
-                  <>
-                    {formatNumber(data.throughput)}
-                    <small>req/s</small>
-                  </>
-                }
-                icon={Activity}
+                title="Websites"
+                value={data.sites}
+                icon={Globe}
                 seed={5}
                 tone="green"
                 detail={
                   <>
-                    <span className="purple-text">{data.applications} services</span>
-                    <span className="muted"> reporting application metrics</span>
+                    <span className="purple-text">{data.healthySites} up</span>
+                    <span className="muted"> of {data.sites} monitored</span>
                   </>
                 }
               />
@@ -181,35 +125,9 @@ export function Overview() {
                 }
               />
             </div>
-            <div className="section-heading">
-              <h2>Infrastructure performance</h2>
-              <Link to="/infrastructure">
-                Explore infrastructure
-                <ArrowUpRight size={14} />
-              </Link>
-            </div>
-            <div className="two-col">
-              <ChartPanel
-                metric="cpu"
-                title="CPU utilization"
-                subtitle="How hard your infrastructure is working"
-                color="#8c74e8"
-                unit="%"
-              />
-              <ChartPanel
-                metric="memory"
-                title="Memory usage"
-                subtitle="Memory consumption across your hosts"
-                color="#4ca9a7"
-                unit="%"
-              />
-            </div>
             <div className="overview-lower">
               <Card>
-                <CardHeader
-                  title="Server health"
-                  subtitle="A pulse check on your connected infrastructure"
-                >
+                <CardHeader title="Server health" subtitle="The latest report from each server">
                   <Link className="subtle-link" to="/servers">
                     View all
                     <ChevronRight size={14} />
@@ -217,8 +135,9 @@ export function Overview() {
                 </CardHeader>
                 <DataTable
                   pageSize={5}
-                  rows={data.resources.filter((r) => r.type === 'server')}
+                  rows={data.resources}
                   emptyTitle="No servers connected"
+                  emptyDescription="Connect a server and it will show up here within a minute."
                   columns={[
                     {
                       key: 'name',
@@ -230,7 +149,7 @@ export function Overview() {
                           </span>
                           <div>
                             <strong>{r.name}</strong>
-                            <small>{r.labels?.region || r.environment}</small>
+                            <small>{r.labels?.os || r.environment}</small>
                           </div>
                         </div>
                       ),
@@ -289,43 +208,10 @@ export function Overview() {
                 </div>
               </Card>
             </div>
-            <div className="application-strip">
-              <div className="application-strip-title">
-                <span className="resource-icon purple">
-                  <AppWindow size={20} />
-                </span>
-                <div>
-                  <strong>A closer look at your applications</strong>
-                  <p>Follow a request from first byte to final response.</p>
-                </div>
-              </div>
-              <div>
-                <span className="strip-stat">
-                  <small>ERROR RATE</small>
-                  <strong>
-                    {formatNumber(data.errorRate, 2)}
-                    <small>%</small>
-                  </strong>
-                </span>
-                <span className="strip-stat">
-                  <small>P95 LATENCY</small>
-                  <strong>
-                    {formatNumber(data.p95)}
-                    <small>ms</small>
-                  </strong>
-                </span>
-                <Link className="button button-secondary" to="/applications">
-                  Explore applications
-                  <ArrowUpRight size={15} />
-                </Link>
-              </div>
-            </div>
-            {data.source === 'demo' && (
-              <p className="data-note">
-                You’re viewing sample telemetry. Connect a source to try real host inventory; use
-                connected mode for stored metrics, logs, and traces.
-              </p>
-            )}
+            <p className="data-note">
+              Charts with 1 hour to 30 day history are coming in the next release. Values shown are
+              each server’s latest report.
+            </p>
           </>
         )}
       </QueryState>

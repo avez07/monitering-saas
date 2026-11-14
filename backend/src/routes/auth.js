@@ -2,52 +2,58 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
-import { hashPassword, verifyPassword } from '../lib/crypto.js';
-import { sessionToken, publicUser } from '../services/auth.js';
+import { hashPassword, verifyPassword, burnPasswordCheck } from '../lib/crypto.js';
+import {
+  csrfGuard,
+  startSession,
+  endSession,
+  endAllSessions,
+  clearSessionCookie,
+  resolveSession,
+  publicUser,
+} from '../services/auth.js';
+
+const email = z
+  .string()
+  .email()
+  .transform((v) => v.toLowerCase());
 
 export function authRoutes(store, limits) {
   const router = Router();
+  router.use(csrfGuard);
   router.get('/config', (req, res) =>
-    res.json({
-      demo: config.DEMO_MODE,
-      billing: config.BILLING_PROVIDER,
-      email: config.EMAIL_PROVIDER,
-    }),
+    res.json({ billing: config.BILLING_PROVIDER, email: config.EMAIL_PROVIDER }),
   );
-  router.post('/login', async (req, res) => {
-    await limits.use(`login:${req.ip}`, 1, 20, 300);
-    const input = z
-      .object({
-        email: z
-          .string()
-          .email()
-          .transform((v) => v.toLowerCase()),
-        password: z.string().min(1).max(256),
-      })
-      .parse(req.body);
-    const user = await store.find('user', { email: input.email });
-    assert(
-      user && verifyPassword(input.password, user.passwordHash),
-      401,
-      'Email or password is incorrect.',
-    );
-    res.json({ token: sessionToken(user), user: publicUser(user) });
+  router.get('/me', async (req, res) => {
+    res.json({ user: publicUser(await resolveSession(store, req)) });
   });
-  router.post('/demo', async (req, res) => {
-    assert(config.DEMO_MODE, 404, 'Demo login is disabled.');
-    const user = await store.find('user', { email: config.DEMO_EMAIL });
-    assert(user, 503, 'Demo data is not available.');
-    res.json({ token: sessionToken(user), user: publicUser(user) });
+  router.post('/login', async (req, res) => {
+    await limits.use(`login:ip:${req.ip}`, 1, 30, 300);
+    const input = z.object({ email, password: z.string().min(1).max(256) }).parse(req.body);
+    // Lock a single account after repeated failures, whatever IP the attempts come from.
+    await limits.assertUnder(
+      `login:fail:${input.email}`,
+      10,
+      900,
+      'Too many failed sign-in attempts for this account. Try again in 15 minutes.',
+    );
+    const user = await store.find('user', { email: input.email });
+    const valid = user
+      ? verifyPassword(input.password, user.passwordHash)
+      : burnPasswordCheck(input.password);
+    if (!valid) {
+      await limits.record(`login:fail:${input.email}`, 900);
+      assert(false, 401, 'Email or password is incorrect.');
+    }
+    await startSession(store, req, res, user);
+    res.json({ user: publicUser(user) });
   });
   router.post('/register', async (req, res) => {
     await limits.use(`register:${req.ip}`, 1, 10, 3600);
     const input = z
       .object({
         name: z.string().trim().min(2).max(80),
-        email: z
-          .string()
-          .email()
-          .transform((v) => v.toLowerCase()),
+        email,
         password: z.string().min(10).max(128),
         organization: z.string().trim().min(2).max(80),
       })
@@ -82,10 +88,10 @@ export function authRoutes(store, limits) {
       await tx.create('environment', { orgId: org.id, projectId: project.id, name: 'production' });
       await tx.create('subscription', {
         orgId: org.id,
-        planId: 'starter',
-        status: 'trialing',
+        planId: 'free',
+        status: 'active',
         interval: 'monthly',
-        periodEnd: new Date(Date.now() + 14 * 86400000).toISOString(),
+        periodEnd: new Date(Date.now() + 3650 * 86400000),
         cancelAtPeriodEnd: false,
       });
       await tx.create('notificationChannel', {
@@ -97,7 +103,19 @@ export function authRoutes(store, limits) {
       });
       return user;
     });
-    res.status(201).json({ token: sessionToken(user), user: publicUser(user) });
+    await startSession(store, req, res, user);
+    res.status(201).json({ user: publicUser(user) });
+  });
+  router.post('/logout', async (req, res) => {
+    await endSession(store, req);
+    clearSessionCookie(res);
+    res.status(204).end();
+  });
+  router.post('/logout-all', async (req, res) => {
+    const user = await resolveSession(store, req);
+    await endAllSessions(store, user.id);
+    clearSessionCookie(res);
+    res.status(204).end();
   });
   return router;
 }

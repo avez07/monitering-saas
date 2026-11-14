@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { checkTarget } from './uptime.js';
 import { entitlements } from './limits.js';
@@ -142,7 +144,6 @@ export async function runChecks(store) {
   for (const monitor of monitors.filter(
     (m) => !m.nextCheckAt || new Date(m.nextCheckAt) <= new Date(),
   )) {
-    if (config.DEMO_MODE && monitor.demo) continue;
     const result = await checkTarget(monitor.target);
     const failures = result.ok ? 0 : (monitor.consecutiveFailures || 0) + 1;
     const status = result.ok
@@ -188,7 +189,7 @@ export async function runChecks(store) {
 }
 export async function housekeeping(store) {
   for (const agent of await store.list('agent')) {
-    if ((agent.demo && config.DEMO_MODE) || agent.status === 'revoked') continue;
+    if (agent.status === 'revoked' || agent.status === 'offline') continue;
     if (Date.now() - new Date(agent.lastSeen) > 180000) {
       await store.update('agent', agent.id, { status: 'offline' });
       for (const r of await store.list('monitoredResource', { agentId: agent.id }))
@@ -202,49 +203,82 @@ export async function housekeeping(store) {
     } catch {
       /* retain metadata after subscription expiry */
     }
-    const cutoff = Date.now() - days * 86400000;
+    const createdAt = { lt: new Date(Date.now() - days * 86400000) };
     for (const table of ['uptimeCheck', 'notificationDelivery'])
-      for (const row of await store.list(table, { orgId: org.id }))
-        if (new Date(row.createdAt).getTime() < cutoff) await store.remove(table, row.id);
+      await store.removeMany(table, { orgId: org.id, createdAt });
   }
+  // Expired sessions and used/expired enrollment tokens are useless; remove them in bulk.
+  const now = new Date();
+  await store.removeMany('session', {
+    OR: [{ expiresAt: { lt: now } }, { revokedAt: { lt: new Date(Date.now() - 7 * 86400000) } }],
+  });
+  await store.removeMany('agentEnrollmentToken', {
+    expiresAt: { lt: new Date(Date.now() - 86400000) },
+  });
 }
-export function startWorkers(store, limits) {
+
+export const LEASE_ID = 'main-worker';
+export const LEASE_MS = 90000;
+/**
+ * Try to become the single active worker. The lease lives in Postgres, so two worker processes can
+ * never run at once, and a crashed worker is replaced as soon as its lease expires.
+ */
+export async function acquireLease(store, holder, ttlMs = LEASE_MS) {
+  const expiresAt = new Date(Date.now() + ttlMs);
+  const row = await store.find('workerLease', { id: LEASE_ID });
+  if (!row) {
+    try {
+      await store.create('workerLease', { id: LEASE_ID, holder, expiresAt });
+      return true;
+    } catch (error) {
+      if (error.code === 'P2002') return false; // another worker created it first
+      throw error;
+    }
+  }
+  if (row.holder !== holder && row.expiresAt > new Date()) return false;
+  // Atomically take over only if nobody changed the lease since we read it.
+  return store.claim(
+    'workerLease',
+    LEASE_ID,
+    { holder: row.holder, expiresAt: row.expiresAt },
+    { holder, expiresAt },
+  );
+}
+export async function releaseLease(store, holder) {
+  await store.client?.workerLease.updateMany({
+    where: { id: LEASE_ID, holder },
+    data: { expiresAt: new Date(0) },
+  });
+}
+
+/** One pass of background work. Returns false when another worker holds the lease. */
+export async function runWorkerTick(store, holder) {
+  if (!(await acquireLease(store, holder))) return false;
+  for (const step of [runChecks, evaluateAlerts, deliverNotifications, housekeeping]) {
+    await step(store);
+    // A long step must not let the lease expire underneath us.
+    if (!(await acquireLease(store, holder))) return false;
+  }
+  return true;
+}
+export function startWorkers(store) {
+  const holder = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
   let running = false;
   const tick = async () => {
     if (running) return;
     running = true;
-    let locked = false;
     try {
-      if (limits.redis) {
-        locked = await limits.redis.set(
-          'pulse:worker-lock',
-          process.pid.toString(),
-          'EX',
-          120,
-          'NX',
-        );
-        if (!locked) return;
-      }
-      await runChecks(store);
-      await evaluateAlerts(store);
-      await deliverNotifications(store);
-      await housekeeping(store);
+      await runWorkerTick(store, holder);
     } catch (error) {
       console.error('Worker:', error.message);
     } finally {
-      if (locked)
-        await limits.redis
-          .eval(
-            "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",
-            1,
-            'pulse:worker-lock',
-            process.pid.toString(),
-          )
-          .catch(() => {});
       running = false;
     }
   };
+  tick();
   const timer = setInterval(tick, config.WORKER_INTERVAL_MS);
-  timer.unref();
-  return () => clearInterval(timer);
+  return async () => {
+    clearInterval(timer);
+    await releaseLease(store, holder).catch(() => {});
+  };
 }

@@ -1,18 +1,61 @@
 #!/usr/bin/env node
-// Inspectable, dependency-free host agent. Runs without elevated permissions.
+// Inspectable, dependency-free development agent. Runs without elevated permissions and opens no ports.
+// (The production agent is a Go binary installed with one command; this script is the dev stand-in.)
+//
+//   First run:  node backend/scripts/agent.mjs --enroll <token> --api https://api.yuktiops.com
+//   Later runs: node backend/scripts/agent.mjs
 import os from 'node:os';
-import { readFile, writeFile, statfs } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, writeFile, mkdir, statfs } from 'node:fs/promises';
+import { join } from 'node:path';
 
-const envPath = resolve(process.cwd(), '.env');
-try {
-  process.loadEnvFile(envPath);
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
+const configDir = process.env.YUKTIOPS_CONFIG_DIR || join(os.homedir(), '.config', 'yuktiops');
+const configFile = join(configDir, 'agent.env');
+const arg = (name) => {
+  const i = process.argv.indexOf(name);
+  return i === -1 ? undefined : process.argv[i + 1];
+};
+
+// Saved settings: KEY=value lines in the user's config directory (mode 0600), not in a project .env.
+async function loadSaved() {
+  try {
+    return Object.fromEntries(
+      (await readFile(configFile, 'utf8'))
+        .split(/\r?\n/)
+        .filter((l) => /^[A-Z_]+=/.test(l))
+        .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
+    );
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
 }
-const baseUrl = process.env.API_PUBLIC_URL || 'http://localhost:4000';
-let credential = process.env.AGENT_TOKEN;
-const enrollIndex = process.argv.indexOf('--enroll');
+async function save(values) {
+  await mkdir(configDir, { recursive: true, mode: 0o700 });
+  await writeFile(
+    configFile,
+    Object.entries(values)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n') + '\n',
+    { mode: 0o600 },
+  );
+}
+const saved = await loadSaved();
+const baseUrl = (
+  arg('--api') ||
+  process.env.YUKTIOPS_API_URL ||
+  saved.API_URL ||
+  'https://api.yuktiops.com'
+).replace(/\/$/, '');
+// Credentials must never travel over plain HTTP, except to a server on this very machine.
+const { protocol, hostname } = new URL(baseUrl);
+if (protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+  console.error(
+    `Refusing to send credentials over ${protocol}// to ${hostname}. Use an https:// API URL.`,
+  );
+  process.exit(1);
+}
+let credential = process.env.AGENT_TOKEN || saved.AGENT_TOKEN;
+
 async function request(path, body, authenticated = true) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -31,9 +74,10 @@ async function request(path, body, authenticated = true) {
   }
   return response.json();
 }
-if (enrollIndex !== -1) {
-  const enrollmentToken = process.argv[enrollIndex + 1];
-  if (!enrollmentToken) throw new Error('Provide the short-lived enrollment token after --enroll.');
+const enrollmentToken = arg('--enroll');
+if (process.argv.includes('--enroll') && !enrollmentToken)
+  throw new Error('Provide the short-lived enrollment token after --enroll.');
+if (enrollmentToken) {
   const enrolled = await request(
     '/api/agents/enroll',
     {
@@ -45,22 +89,14 @@ if (enrollIndex !== -1) {
     false,
   );
   credential = enrolled.token;
-  let content = '';
-  try {
-    content = await readFile(envPath, 'utf8');
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  content = /^AGENT_TOKEN=.*$/m.test(content)
-    ? content.replace(/^AGENT_TOKEN=.*$/m, `AGENT_TOKEN=${credential}`)
-    : `${content}\nAGENT_TOKEN=${credential}\n`;
-  await writeFile(envPath, content, { mode: 0o600 });
-  console.log(`Enrolled ${os.hostname()}. Credential saved to .env. Starting collection.`);
+  await save({ API_URL: baseUrl, AGENT_TOKEN: credential });
+  console.log(`Enrolled ${os.hostname()}. Credential saved to ${configFile}. Starting collection.`);
 }
 if (!credential)
   throw new Error(
-    'Set AGENT_TOKEN in .env or enroll first using the command from Agent management.',
+    'Not enrolled yet. Run with --enroll <token> using the command from the dashboard.',
   );
+
 const totals = () =>
   os.cpus().reduce(
     (a, cpu) => {
@@ -80,7 +116,7 @@ process.on('SIGTERM', () => {
   stopped = true;
 });
 console.log(
-  `Pulse agent · ${os.hostname()} · ${os.platform()} ${os.arch()} · outbound to ${baseUrl}`,
+  `YuktiOps agent · ${os.hostname()} · ${os.platform()} ${os.arch()} · outbound to ${baseUrl}`,
 );
 while (!stopped) {
   const current = totals();
@@ -105,34 +141,16 @@ while (!stopped) {
     os: `${os.type()} ${os.release()}`,
   };
   try {
-    const fs = await statfs(process.cwd());
+    // Root filesystem (system drive on Windows), not whatever directory the agent was started in.
+    const fs = await statfs(
+      process.platform === 'win32' ? `${process.env.SystemDrive || 'C:'}\\` : '/',
+    );
     measurements.disk = +(100 * (1 - fs.bavail / fs.blocks)).toFixed(2);
   } catch {
     /* Filesystem statistics are not supported on every OS. */
   }
   try {
     await request('/api/agents/heartbeat', measurements);
-    const timeUnixNano = `${Date.now()}000000`;
-    const metrics = ['cpu', 'memory', 'disk']
-      .filter((k) => measurements[k] !== undefined)
-      .map((k) => ({
-        name: `pulse.host.${k}.utilization`,
-        unit: '%',
-        gauge: { dataPoints: [{ timeUnixNano, asDouble: measurements[k] }] },
-      }));
-    await request('/otlp/v1/metrics', {
-      resourceMetrics: [
-        {
-          resource: {
-            attributes: [
-              { key: 'host.name', value: { stringValue: os.hostname() } },
-              { key: 'service.name', value: { stringValue: 'pulse-host-agent' } },
-            ],
-          },
-          scopeMetrics: [{ scope: { name: 'pulse.host', version: '0.1.0' }, metrics }],
-        },
-      ],
-    });
     failures = 0;
     console.log(
       `${new Date().toISOString()} · CPU ${measurements.cpu}% · Memory ${measurements.memory}% · reported`,

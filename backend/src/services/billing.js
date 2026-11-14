@@ -3,13 +3,12 @@ import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
 
 // Adapters implement changeSubscription; the mock never charges a real payment method.
+// Razorpay (INR) and Stripe (USD) adapters arrive in the billing phase.
 export const billingProvider = {
   name: 'mock',
   async changeSubscription(store, orgId, plan, interval) {
     const subscription = await store.find('subscription', { orgId });
-    const periodEnd = new Date(
-      Date.now() + (interval === 'annual' ? 365 : 30) * 86400000,
-    ).toISOString();
+    const periodEnd = new Date(Date.now() + (interval === 'annual' ? 365 : 30) * 86400000);
     await store.update('subscription', subscription.id, {
       planId: plan.id,
       status: 'active',
@@ -19,12 +18,12 @@ export const billingProvider = {
     });
     return store.create('invoice', {
       orgId,
-      number: `DEMO-${Date.now()}`,
-      amount: plan.price * (interval === 'annual' ? 10 : 1),
-      currency: plan.currency,
+      number: `MOCK-${Date.now()}`,
+      amount: plan.priceUsdCents * (interval === 'annual' ? 10 : 1),
+      currency: 'USD',
       status: 'simulated',
       provider: 'mock',
-      periodStart: new Date().toISOString(),
+      periodStart: new Date(),
       periodEnd,
     });
   },
@@ -61,7 +60,7 @@ export async function processWebhook(store, event) {
       providerId: event.id,
       provider: 'mock',
       amount: event.amount || 0,
-      currency: 'INR',
+      currency: event.currency || 'USD',
       status: event.type === 'payment.succeeded' ? 'succeeded' : 'failed',
     });
     return { duplicate: false };

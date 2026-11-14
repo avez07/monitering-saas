@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { session } from './lib/api';
+import { api, session } from './lib/api';
 import { Layout } from './components/Layout';
+import { Loading } from './components/ui';
 import { AuthPage } from './pages/Auth';
 import { Overview } from './pages/Overview';
-import { ResourcePage } from './pages/Resources';
-import { LogsPage, TracesPage } from './pages/Explorers';
+import { ServersPage } from './pages/Resources';
 import { AlertsPage, AgentsPage, UptimePage } from './pages/Operations';
 import { TeamPage, BillingPage, SettingsPage } from './pages/Administration';
 import './styles.css';
@@ -16,23 +16,34 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15000, retry: 1, refetchOnWindowFocus: false } },
 });
 function App() {
-  const [signedIn, setSignedIn] = useState(!!session.token);
+  // 'checking' until the server tells us whether the httpOnly session cookie is valid.
+  const [state, setState] = useState('checking');
+  useEffect(() => {
+    api('/auth/me')
+      .then(() => setState('in'))
+      .catch(() => setState('out'));
+  }, []);
   useEffect(() => {
     const logout = () => {
-      session.token = null;
-      session.org = null;
-      queryClient.clear();
-      setSignedIn(false);
+      // Revoke the session on the server first; the cookie itself is cleared by the response.
+      api('/auth/logout', { method: 'POST' })
+        .catch(() => {})
+        .finally(() => {
+          session.org = null;
+          queryClient.clear();
+          setState('out');
+        });
     };
-    window.addEventListener('pulse:logout', logout);
-    return () => window.removeEventListener('pulse:logout', logout);
+    window.addEventListener('yuktiops:logout', logout);
+    return () => window.removeEventListener('yuktiops:logout', logout);
   }, []);
-  if (!signedIn)
+  if (state === 'checking') return <Loading />;
+  if (state === 'out')
     return (
       <AuthPage
         onSuccess={() => {
           queryClient.clear();
-          setSignedIn(true);
+          setState('in');
         }}
       />
     );
@@ -41,13 +52,7 @@ function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Overview />} />
-          <Route path="infrastructure" element={<ResourcePage />} />
-          <Route path="servers" element={<ResourcePage type="server" />} />
-          <Route path="containers" element={<ResourcePage type="container" />} />
-          <Route path="applications" element={<ResourcePage type="application" />} />
-          <Route path="databases" element={<ResourcePage type="database" />} />
-          <Route path="logs" element={<LogsPage />} />
-          <Route path="traces" element={<TracesPage />} />
+          <Route path="servers" element={<ServersPage />} />
           <Route path="uptime" element={<UptimePage />} />
           <Route path="alerts" element={<AlertsPage />} />
           <Route path="agents" element={<AgentsPage />} />

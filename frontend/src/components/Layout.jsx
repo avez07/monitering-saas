@@ -6,11 +6,6 @@ import {
   LayoutDashboard,
   Layers3,
   Server,
-  Boxes,
-  AppWindow,
-  ScrollText,
-  Route,
-  Database,
   Globe,
   Bell,
   Users,
@@ -38,19 +33,13 @@ export const navigation = [
     title: 'WORKSPACE',
     items: [
       { path: '/', label: 'Overview', icon: LayoutDashboard },
-      { path: '/infrastructure', label: 'Infrastructure', icon: Layers3 },
+      { path: '/servers', label: 'Servers', icon: Server },
     ],
   },
   {
-    title: 'OBSERVE',
+    title: 'MONITOR',
     items: [
-      { path: '/servers', label: 'Servers', icon: Server },
-      { path: '/containers', label: 'Containers', icon: Boxes },
-      { path: '/applications', label: 'Applications', icon: AppWindow },
-      { path: '/logs', label: 'Logs explorer', icon: ScrollText },
-      { path: '/traces', label: 'Trace explorer', icon: Route },
-      { path: '/databases', label: 'Databases', icon: Database },
-      { path: '/uptime', label: 'Uptime', icon: Globe },
+      { path: '/uptime', label: 'Websites', icon: Globe },
       { path: '/alerts', label: 'Alerts', icon: Bell },
     ],
   },
@@ -59,7 +48,7 @@ export const navigation = [
     items: [
       { path: '/agents', label: 'Agents', icon: Radio },
       { path: '/team', label: 'Team & access', icon: Users, admin: true },
-      { path: '/billing', label: 'Billing & usage', icon: CreditCard, admin: true },
+      { path: '/billing', label: 'Plan & billing', icon: CreditCard, admin: true },
       { path: '/settings', label: 'Settings', icon: Settings, admin: true },
     ],
   },
@@ -98,7 +87,7 @@ export function Layout() {
         >
           Reset organization
         </Button>
-        <Button variant="ghost" onClick={() => window.dispatchEvent(new Event('pulse:logout'))}>
+        <Button variant="ghost" onClick={() => window.dispatchEvent(new Event('yuktiops:logout'))}>
           Sign out
         </Button>
       </div>
@@ -138,7 +127,7 @@ export function Layout() {
             <span className="brand-icon">
               <Activity size={23} />
             </span>
-            pulse<span className="brand-dot">.</span>
+            yukti<span className="brand-dot">ops</span>
             <span className="brand-plan">BETA</span>
           </NavLink>
           <div className="workspace-switch">
@@ -187,16 +176,16 @@ export function Layout() {
                 <span className="help-icon">
                   <Activity size={15} />
                 </span>
-                Better visibility starts here.
+                Add your first server.
               </div>
-              <p>Connect a host and see the full picture.</p>
+              <p>It takes about two minutes.</p>
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => setOnboard(true)}
                 disabled={!canEdit}
               >
-                Connect infrastructure
+                Connect a server
                 <ArrowUpRight size={13} />
               </Button>
             </div>
@@ -215,7 +204,7 @@ export function Layout() {
               <button
                 title="Sign out"
                 aria-label="Sign out"
-                onClick={() => window.dispatchEvent(new Event('pulse:logout'))}
+                onClick={() => window.dispatchEvent(new Event('yuktiops:logout'))}
               >
                 <LogOut size={16} />
               </button>
@@ -241,13 +230,13 @@ export function Layout() {
                 className="global-search"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  navigate(`/infrastructure?search=${encodeURIComponent(search)}`);
+                  navigate(`/servers?search=${encodeURIComponent(search)}`);
                 }}
               >
                 <Search size={15} />
                 <input
-                  aria-label="Search resources"
-                  placeholder="Search your workspace…"
+                  aria-label="Search servers"
+                  placeholder="Search servers…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -294,15 +283,9 @@ export function Layout() {
                 <option>development</option>
               </Select>
               <div className="context-right">
-                {workspace.demo && (
-                  <span className="demo-pill">
-                    <span />
-                    Demo workspace
-                  </span>
-                )}
                 <span className="connection-state">
                   <i className="status-dot" />
-                  {workspace.demo ? 'Sample telemetry' : 'Connected workspace'}
+                  {workspace.plan.name} plan
                 </span>
               </div>
             </div>
@@ -310,10 +293,10 @@ export function Layout() {
           </main>
           <footer className="app-footer">
             <span>
-              <Activity size={13} /> Pulse monitoring
+              <Activity size={13} /> YuktiOps
             </span>
             <span>
-              Clarity across your stack. <span className="muted">v0.1.0</span>
+              Simple server monitoring. <span className="muted">v0.1.0</span>
             </span>
           </footer>
         </div>

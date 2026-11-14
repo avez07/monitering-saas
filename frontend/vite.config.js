@@ -19,7 +19,7 @@ export default defineConfig(() => {
       host: '127.0.0.1',
       port: Number(environment.FRONTEND_PORT || 5173),
       strictPort: true,
-      proxy: { '/api': backendUrl, '/otlp': backendUrl },
+      proxy: { '/api': backendUrl },
     },
     build: {
       rollupOptions: {

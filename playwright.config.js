@@ -6,7 +6,7 @@ export default defineConfig({
   timeout: 45000,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: `http://127.0.0.1:${process.env.FRONTEND_PORT || 5173}`,
     channel: 'chrome',
     headless: true,
     viewport: { width: 1440, height: 1050 },

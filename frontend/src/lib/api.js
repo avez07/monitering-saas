@@ -1,15 +1,19 @@
+// The session lives in an httpOnly cookie that page scripts cannot read. Only the selected
+// organization (not a secret) is remembered in the browser.
 export const session = {
-  get token() {
-    return localStorage.getItem('pulse.token');
-  },
-  set token(value) {
-    value ? localStorage.setItem('pulse.token', value) : localStorage.removeItem('pulse.token');
-  },
   get org() {
-    return localStorage.getItem('pulse.org');
+    try {
+      return localStorage.getItem('yuktiops.org');
+    } catch {
+      return null;
+    }
   },
   set org(value) {
-    value ? localStorage.setItem('pulse.org', value) : localStorage.removeItem('pulse.org');
+    try {
+      value ? localStorage.setItem('yuktiops.org', value) : localStorage.removeItem('yuktiops.org');
+    } catch {
+      /* storage can be unavailable in private windows */
+    }
   },
 };
 export function url(path, params = {}) {
@@ -21,8 +25,8 @@ export function url(path, params = {}) {
 export async function api(path, { method = 'GET', body, params, text = false } = {}) {
   const response = await fetch(url(path, params), {
     method,
+    credentials: 'same-origin',
     headers: {
-      ...(session.token ? { Authorization: `Bearer ${session.token}` } : {}),
       ...(session.org ? { 'X-Organization-Id': session.org } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
@@ -31,7 +35,7 @@ export async function api(path, { method = 'GET', body, params, text = false } =
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'The API is unavailable.' }));
     if (response.status === 401 && !path.startsWith('/auth'))
-      window.dispatchEvent(new Event('pulse:logout'));
+      window.dispatchEvent(new Event('yuktiops:logout'));
     throw new Error(error.error || `Request failed (${response.status}).`);
   }
   if (response.status === 204) return null;

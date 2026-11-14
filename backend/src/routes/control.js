@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
-import { hashPassword } from '../lib/crypto.js';
 import {
   canAdmin,
   requireMemberGrant,
@@ -14,7 +13,7 @@ import {
   requireRow,
   audit,
 } from '../services/auth.js';
-import { enforceCount, entitlements } from '../services/limits.js';
+import { enforceCount, entitlements, planLimit } from '../services/limits.js';
 import { resolveTarget, checkTarget } from '../services/uptime.js';
 import { evaluateAlerts, deliverNotifications } from '../services/workers.js';
 import { billingProvider } from '../services/billing.js';
@@ -25,7 +24,7 @@ const nullableDate = z.string().datetime().nullable();
 const resourceInput = z.object({
   name,
   projectId: id,
-  type: z.enum(['server', 'container', 'application', 'database']),
+  type: z.enum(['server']),
   environment: z.string().min(1).max(40).default('production'),
   labels: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).default({}),
 });
@@ -50,7 +49,6 @@ export function controlRoutes(store, limits) {
       projects: await visibleProjects(store, req.context),
       subscription,
       plan: await store.find('subscriptionPlan', { id: subscription.planId }),
-      demo: config.DEMO_MODE,
       billingProvider: billingProvider.name,
       apiPublicUrl: config.API_PUBLIC_URL,
     });
@@ -62,35 +60,28 @@ export function controlRoutes(store, limits) {
         (!req.query.projectId || r.projectId === req.query.projectId) &&
         (!req.query.environment || r.environment === req.query.environment),
     );
-    const byType = (type) => rows.filter((r) => r.type === type);
-    const servers = byType('server'),
-      containers = byType('container'),
-      apps = byType('application');
-    const sum = (key) => apps.reduce((a, r) => a + Number(r.labels?.[key] || 0), 0);
+    const servers = rows.filter((r) => r.type === 'server');
+    const sites = rows.filter((r) => r.type === 'uptime');
     const incidents = (await scopedRows(store, req.context, 'alertIncident')).filter(
       (r) =>
         ['firing', 'acknowledged'].includes(r.state) &&
         (!req.query.projectId || r.projectId === req.query.projectId),
     );
     res.json({
-      source: config.DEMO_MODE ? 'demo' : 'live',
       servers: servers.length,
       healthyServers: servers.filter((r) => r.status === 'healthy').length,
-      containers: containers.length,
-      runningContainers: containers.filter((r) => r.status === 'running').length,
-      applications: apps.length,
-      throughput: sum('throughput'),
-      errorRate: apps.length ? sum('errorRate') / apps.length : 0,
-      p95: apps.length ? Math.max(...apps.map((a) => a.labels?.p95 || 0)) : 0,
+      warningServers: servers.filter((r) => r.status === 'warning').length,
+      offlineServers: servers.filter((r) => r.status === 'unhealthy').length,
+      sites: sites.length,
+      healthySites: sites.filter((r) => r.status === 'healthy').length,
       incidents: incidents.slice(0, 5),
-      resources: rows.slice(0, 12),
-      usage: await store.list('usageAggregate', { orgId: req.context.orgId }),
+      resources: servers.slice(0, 12),
     });
   });
   router.get('/resources', async (req, res) => {
     const filters = z
       .object({
-        type: z.enum(['server', 'container', 'application', 'database', 'uptime']).optional(),
+        type: z.enum(['server', 'uptime']).optional(),
         projectId: id.optional(),
         environment: z.string().max(40).optional(),
         search: z.string().max(200).optional(),
@@ -109,15 +100,14 @@ export function controlRoutes(store, limits) {
   router.post('/resources', canEdit, async (req, res) => {
     const input = resourceInput.parse(req.body);
     await requireProject(store, req.context, input.projectId);
-    if (input.type === 'server' || input.type === 'container')
-      await enforceCount(
-        store,
-        req.context.orgId,
-        input.type === 'server' ? 'servers' : 'containers',
-        (
-          await store.list('monitoredResource', { orgId: req.context.orgId, type: input.type })
-        ).filter((r) => !r.deletedAt).length,
-      );
+    await enforceCount(
+      store,
+      req.context.orgId,
+      'servers',
+      (await store.list('monitoredResource', { orgId: req.context.orgId, type: 'server' })).filter(
+        (r) => !r.deletedAt,
+      ).length,
+    );
     const row = await store.create('monitoredResource', {
       ...input,
       orgId: req.context.orgId,
@@ -177,52 +167,6 @@ export function controlRoutes(store, limits) {
         }),
       ),
     );
-  });
-  router.post('/members', canAdmin, async (req, res) => {
-    const input = z
-      .object({
-        name,
-        email: z
-          .string()
-          .email()
-          .transform((v) => v.toLowerCase()),
-        password: z.string().min(10).max(128).optional(),
-        role: z.enum(['admin', 'editor', 'viewer']),
-        projectIds: z.array(id).max(20).default([]),
-      })
-      .parse(req.body);
-    for (const p of input.projectIds) await requireProject(store, req.context, p);
-    requireMemberGrant(req.context, input.role, input.projectIds);
-    await enforceCount(
-      store,
-      req.context.orgId,
-      'members',
-      (await store.list('organizationMember', { orgId: req.context.orgId })).length,
-    );
-    const member = await store.transaction(async (tx) => {
-      let user = await tx.find('user', { email: input.email });
-      if (!user) {
-        assert(input.password, 400, 'An initial password is required for a new account.');
-        user = await tx.create('user', {
-          name: input.name,
-          email: input.email,
-          passwordHash: hashPassword(input.password),
-        });
-      }
-      assert(
-        !(await tx.find('organizationMember', { orgId: req.context.orgId, userId: user.id })),
-        409,
-        'This user is already a member.',
-      );
-      return tx.create('organizationMember', {
-        orgId: req.context.orgId,
-        userId: user.id,
-        role: input.role,
-        projectIds: input.projectIds,
-      });
-    });
-    await audit(store, req.context, 'member.added', input.email);
-    res.status(201).json(member);
   });
   router.patch('/members/:id', canAdmin, async (req, res) => {
     const member = await requireRow(store, req.context, 'organizationMember', req.params.id);
@@ -364,10 +308,17 @@ export function controlRoutes(store, limits) {
       .parse(req.body);
     await requireProject(store, req.context, input.projectId);
     await resolveTarget(input.target);
+    const { plan } = await entitlements(store, req.context.orgId);
     assert(
-      (await store.list('uptimeMonitor', { orgId: req.context.orgId })).length < 100,
+      input.intervalSeconds >= plan.minCheckIntervalSeconds,
       402,
-      'The pilot supports up to 100 uptime monitors.',
+      `Your ${plan.name} plan checks at most every ${plan.minCheckIntervalSeconds} seconds.`,
+    );
+    await enforceCount(
+      store,
+      req.context.orgId,
+      'monitors',
+      (await store.list('uptimeMonitor', { orgId: req.context.orgId })).length,
     );
     res.status(201).json(
       await store.create('uptimeMonitor', {
@@ -423,7 +374,6 @@ export function controlRoutes(store, limits) {
       plans: await store.list('subscriptionPlan'),
       subscription: await store.find('subscription', { orgId: req.context.orgId }),
       invoices: await store.list('invoice', { orgId: req.context.orgId }),
-      usage: await store.list('usageAggregate', { orgId: req.context.orgId }),
       provider: billingProvider.name,
     }),
   );
@@ -431,17 +381,18 @@ export function controlRoutes(store, limits) {
     const input = z.object({ planId: id, interval: z.enum(['monthly', 'annual']) }).parse(req.body);
     const plan = await store.find('subscriptionPlan', { id: input.planId });
     assert(plan, 404, 'Plan not found.');
-    for (const [type, key] of [
-      ['server', 'servers'],
-      ['container', 'containers'],
-    ])
-      assert(
-        (await store.list('monitoredResource', { orgId: req.context.orgId, type })).filter(
-          (r) => !r.deletedAt,
-        ).length <= plan[key],
-        400,
-        `Remove resources before downgrading below the ${key} limit.`,
-      );
+    assert(
+      (await store.list('monitoredResource', { orgId: req.context.orgId, type: 'server' })).filter(
+        (r) => !r.deletedAt,
+      ).length <= planLimit(plan, 'servers'),
+      400,
+      'Remove servers before downgrading below the included server limit.',
+    );
+    assert(
+      (await store.list('uptimeMonitor', { orgId: req.context.orgId })).length <= plan.monitors,
+      400,
+      'Remove website checks before downgrading.',
+    );
     assert(
       (await store.list('organizationMember', { orgId: req.context.orgId })).length <= plan.members,
       400,
@@ -459,7 +410,7 @@ export function controlRoutes(store, limits) {
       input.interval,
     );
     await audit(store, req.context, 'subscription.changed', plan.name, { provider: 'mock' });
-    res.json({ invoice, message: 'Demo subscription updated. No money was charged.' });
+    res.json({ invoice, message: 'Plan updated. No money was charged (billing is not live yet).' });
   });
   router.post('/billing/cancel', permit('owner'), async (req, res) => {
     const row = await store.find('subscription', { orgId: req.context.orgId });

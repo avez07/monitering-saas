@@ -1,145 +1,92 @@
-# Start Pulse
+# Start YuktiOps (and test Phase 0)
 
-Run commands from the repository root. Node.js **22.12+** and npm are required. The supplied `.env` contains dummy local credentials. Do not paste service credentials into frontend source files.
+Run commands from the repository root. You need **Node.js 22.12+**, npm and **Docker Desktop**. Examples use PowerShell.
 
-## 1. Quick start — no Docker required
+## 1. First-time setup
 
 ```powershell
+Copy-Item .env.example .env        # only if you do not have a .env yet
+docker compose up -d postgres mailpit
 npm install
-npm run dev
-```
-
-Open **http://localhost:5173** and click **Explore the demo workspace**. Alternatively, sign in using `DEMO_EMAIL` and `DEMO_PASSWORD` from `.env`.
-
-- Frontend: http://localhost:5173
-- Backend health: http://localhost:4000/api/health
-- Stop: press **Ctrl+C** in the terminal running the app.
-- Metadata persists in `backend/data/demo.json`. Telemetry charts, logs, and traces are sample data. Demo OTLP requests are authenticated and metered, then discarded.
-- The seed creates ten isolated pilot organizations with separate owners. Only the first belongs to the main demo user.
-
-If `.env` is missing:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Copy it only when missing; overwriting an existing file would replace your configuration and agent token.
-
-## 2. Connect your local computer
-
-1. Open **Agents → Connect agent**.
-2. Select the project and generate an installation token.
-3. Inspect `backend/scripts/agent.mjs`.
-4. Run the generated command in a second terminal, from this repository root.
-
-```text
-node backend/scripts/agent.mjs --enroll <one-time-token-from-the-app>
-```
-
-The agent enrolls once, saves `AGENT_TOKEN` to `.env`, and reports host measurements. Later starts need only:
-
-```powershell
-npm run agent
-```
-
-Keep the agent terminal running. It reports every 30 seconds. Stop with Ctrl+C. In demo mode, inventory shows actual heartbeat measurements while historical charts remain labeled sample data. Use connected mode for stored telemetry. See [collector integrations](docs/AGENTS.md) for full host metrics, container/exporter integrations, and application SDKs.
-
-## 3. Connected mode — PostgreSQL and real telemetry
-
-Start Docker Desktop first. Keep the app stopped while changing modes.
-
-```powershell
-docker compose up -d
-```
-
-Wait for storage services to become ready. Change this value in the root `.env`:
-
-```dotenv
-DEMO_MODE=false
-```
-
-Then run:
-
-```powershell
 npm run db:generate
 npm run db:migrate
-npm run db:seed
+```
+
+`docker compose up` starts PostgreSQL (with the TimescaleDB extension available for Phase 1) on port 5432 and Mailpit (a fake inbox for alert emails) at http://localhost:8025. The `.env` values are local dummies.
+
+> **Port 4000 busy?** If an older copy of the app is still running (for example from before this change), stop it first. Check with `Get-NetTCPConnection -LocalPort 4000 -State Listen`.
+
+## 2. Run it
+
+```powershell
 npm run dev
 ```
 
-Open http://localhost:5173, choose **Create an account**, and register your organization. Connected mode does not enable the public demo-login shortcut or create a known demo owner. Plan definitions are seeded automatically as well.
+Open **http://localhost:5173**, choose **Create an account**, and register. You land on the Overview with the Free plan (2 servers). There is no demo account any more.
 
-Enroll a fresh agent for the new workspace; a demo-store credential will not work against PostgreSQL. Ingestion and query paths now use Mimir, Loki, and Tempo. App traces/logs need a configured SDK or collector. PostgreSQL stores SaaS metadata only.
+- API health: http://localhost:4000/api/health
+- Stop with **Ctrl+C**.
 
-Useful local services:
+## 3. Connect a server (development agent)
 
-| Service                | URL / address         |
-| ---------------------- | --------------------- |
-| Internal Grafana       | http://localhost:3001 |
-| Object-storage console | http://localhost:9001 |
-| Mailpit inbox          | http://localhost:8025 |
-| PostgreSQL             | localhost:5432        |
-| Redis                  | localhost:6379        |
-
-Grafana and S3/RustFS credentials are in `.env`. Grafana's provisioned data sources use the `internal` telemetry tenant; customer project tenant IDs are different. Configure an operations-only data source for a specific project when diagnosing it. Customers use the React app.
-
-Email defaults to a local database outbox. To test SMTP through Mailpit, set `EMAIL_PROVIDER=smtp` in `.env`, keep the provided SMTP host/port, and restart the backend. Local mode never sends mail. Billing stays simulated until a real provider adapter is implemented.
-
-## 4. Build and serve from one Node process
+1. Go to **Servers → Connect a server**, choose the project, and click **Generate install command**.
+2. Run the command shown, in a second terminal at the repository root. It looks like:
 
 ```powershell
-npm run build
-npm start
+node backend/scripts/agent.mjs --enroll <one-time-token> --api http://localhost:4000
 ```
 
-Open **http://localhost:4000**. The backend serves the built frontend and API. Stop the previous development API first because it uses the same port. For browser-based installers on another host, set `API_PUBLIC_URL` to the reachable API URL, not localhost.
+3. Within about 30 seconds your computer appears under **Servers** with CPU, memory and disk. The credential is saved in `%USERPROFILE%\.config\yuktiops\agent.env`, not in the project. Later starts only need `npm run agent`.
 
-## 5. Run everything through Docker
+The agent refuses to send credentials over plain `http://` unless the server is `localhost`. The one-line installer for real servers comes in Phase 1.
+
+## 4. Run the automated tests
 
 ```powershell
-docker compose --profile app up -d --build
+npm test            # 24 backend tests on a real PostgreSQL (database yuktiops_test, created automatically)
+npm run build       # production frontend build
+npm run test:ui     # 4 browser tests (Playwright; needs Google Chrome; starts its own API and dashboard)
 ```
 
-Open **http://localhost:4000** and register a new workspace. The app profile explicitly uses connected mode and container network endpoints. Database migrations run at container startup. Docker Compose is a local development deployment with dummy credentials and no TLS termination; see [operations](docs/OPERATIONS.md) for deployment changes.
-
-Inspect status and logs:
+If ports 4000/5173 are taken, run the browser tests on other ports. `APP_URL` must match the dashboard address:
 
 ```powershell
-docker compose ps
-docker compose logs --tail 100 app mimir loki tempo
-docker compose down
+$env:PORT=4001; $env:FRONTEND_PORT=5174; $env:APP_URL="http://localhost:5174"; npm run test:ui
 ```
 
-`down` stops services and retains named volumes. Do not add `--volumes` unless you intend to delete persisted data.
+## 5. Manual security checks (about 5 minutes)
 
-## 6. Verification commands
+1. **Session is not in page storage.** After signing in, open browser DevTools → Application → Local Storage: no token is stored. Under Cookies, `yuktiops_session` shows **HttpOnly** ✓ and **SameSite=Lax**. In the Console, `document.cookie` does not list it.
+2. **Logout really logs out.** Click the sign-out icon (bottom left), then press the browser Back button or reload: you are on the sign-in screen.
+3. **Account lockout.** Try a wrong password 10 times for one email: the 11th attempt (even with the right password) says too many attempts. Another account still signs in fine.
+4. **No demo login.** `Invoke-RestMethod -Method Post http://localhost:4000/api/auth/demo` returns 401/404, never a login.
+5. **Team page.** **Team & access** has no "Add team member" button. Accounts are no longer created with admin-chosen passwords; invitations arrive in Phase 5.
+6. **Alert notification.** On **Alerts**, add a rule (for example CPU above 1% for 60 seconds) with the agent running. Within about two minutes the incident fires and the message shows under **Alerts → Notification history** (status `local`: with the default `EMAIL_PROVIDER=local` nothing is actually emailed). To see real emails, set `EMAIL_PROVIDER=smtp` in `.env`, restart, and open Mailpit at http://localhost:8025.
+
+## 6. Run the full stack in Docker
 
 ```powershell
-npm test
-npm run build
-npm run db:validate -w backend
-npm run test:ui
+docker compose --profile app up --build -d      # API + worker + dashboard
+# if port 4000 is busy:  $env:API_HOST_PORT=4002; docker compose --profile app up --build -d
+docker compose logs -f api worker
+docker compose --profile app down               # stop (data is kept in the Docker volume)
 ```
 
-Browser tests use installed Google Chrome. If Chrome is unavailable, install Playwright's Chromium using `npx playwright install chromium` and remove `channel: 'chrome'` from `playwright.config.js`.
+Open http://localhost:4000 (or your `API_HOST_PORT`). Note `APP_URL` in `.env` must match the address you open (default `http://localhost:5173`), so for the Docker app set `APP_URL=http://localhost:4000` in `.env` first.
 
-With connected-mode Docker dependencies running, `npm run test:connected` applies migrations to a separate `pulse_integration` database and verifies registration, agent enrollment/heartbeat, real metrics/log/trace storage and query, and tenant isolation. It creates test fixtures and does not delete your main database.
+## Useful commands
 
-With the demo API running, measure a small ten-tenant control-plane workload:
-
-```powershell
-npm run load-test
-```
-
-Results are saved in `docs/verification/load-result.json`. This does not benchmark the telemetry storage stack. See [capacity planning](docs/CAPACITY.md).
+| Command                       | What it does                                              |
+| ----------------------------- | --------------------------------------------------------- |
+| `npm run dev`                 | API, background worker and dashboard with live reload     |
+| `npm run worker`              | Only the background worker (checks, alerts, cleanup)      |
+| `npm run db:migrate`          | Apply database migrations                                 |
+| `npm run db:seed`             | Insert/update the plan definitions (also runs at startup) |
+| `npm run check`               | Tests + build + schema validation                         |
+| `docker compose logs mailpit` | See captured alert emails                                 |
 
 ## Troubleshooting
 
-- **Port in use:** stop the existing app terminal. The defaults are frontend 5173 and API 4000. Configure `FRONTEND_PORT`, `PORT`, `APP_URL`, and `API_PUBLIC_URL` in `.env`; the Vite proxy reads the backend port from that file.
-- **API unavailable:** run `npm run dev` from the root and check backend output.
-- **Expired token:** generate a new installation token. Each lasts 15 minutes and can be used once.
-- **401 after changing modes:** sign out, register/sign in in the new mode, and enroll a new agent.
-- **Prisma engine missing:** allow Prisma's tooling download, then rerun `npm run db:generate`. On npm versions that block lifecycle scripts, the explicit generate command handles client generation.
-- **Docker pipe/daemon unavailable:** start Docker Desktop in Linux-container mode and rerun `docker compose up -d`.
-- **Telemetry service unavailable:** check Docker logs. The app reports the error instead of substituting sample data in connected mode.
-- **Empty live charts:** wait for export intervals and ensure the exporter sends the documented metric names. The lightweight Node agent uses `pulse.host.*`; overview host charts also support the standard OpenTelemetry hostmetrics receiver.
+- **Cannot connect to the database:** `docker compose up -d postgres`, then check `DATABASE_URL` in `.env`.
+- **"Cross-site request blocked":** `APP_URL` in `.env` does not match the address in your browser.
+- **Older Pulse data:** the previous setup used a different Docker volume (`monitering-saas_postgres-data`). It is untouched and no longer used; delete it yourself when you are sure you do not need it.

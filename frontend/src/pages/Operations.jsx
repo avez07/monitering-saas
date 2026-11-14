@@ -8,7 +8,6 @@ import {
   Clock3,
   Mail,
   Radio,
-  Download,
   KeyRound,
   RefreshCw,
   Ban,
@@ -21,7 +20,6 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useApi, useWorkspace, useAction, relativeTime, formatDate } from '../lib/workspace';
-import { api, download } from '../lib/api';
 import {
   Badge,
   Button,
@@ -332,9 +330,6 @@ export function AlertsPage() {
               { value: 'cpu', label: 'CPU utilization (%)' },
               { value: 'memory', label: 'Memory utilization (%)' },
               { value: 'disk', label: 'Disk utilization (%)' },
-              { value: 'restarts', label: 'Container restarts' },
-              { value: 'errorRate', label: 'HTTP error rate (%)' },
-              { value: 'p95', label: 'P95 latency (ms)' },
               { value: 'availability', label: 'Availability (0 or 1)' },
               { value: 'certificateDays', label: 'Certificate days remaining' },
             ],
@@ -406,7 +401,7 @@ export function AgentsPage() {
           value={rows.length}
           icon={Server}
           seed={6}
-          detail="Across Linux, Windows, and containers"
+          detail="Servers and hosts you have connected"
         />
         <StatCard
           title="Offline or revoked"
@@ -440,7 +435,7 @@ export function AgentsPage() {
                     </span>
                     <div>
                       <strong>{a.name}</strong>
-                      <small>{a.demo ? 'Sample agent' : a.id.slice(0, 12)}</small>
+                      <small>{a.id.slice(0, 12)}</small>
                     </div>
                   </div>
                 ),
@@ -455,7 +450,7 @@ export function AgentsPage() {
               {
                 key: 'lastSeen',
                 label: 'Last heartbeat',
-                render: (a) => (a.demo ? 'Sample data' : relativeTime(a.lastSeen)),
+                render: (a) => relativeTime(a.lastSeen),
               },
               {
                 key: 'actions',
@@ -463,24 +458,6 @@ export function AgentsPage() {
                 sortable: false,
                 render: (a) => (
                   <div className="row-actions">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Download collector configuration"
-                      aria-label={`Download config for ${a.name}`}
-                      onClick={async () => {
-                        try {
-                          download(
-                            `${a.name}-collector.yaml`,
-                            await api(`/agents/${a.id}/config`, { text: true }),
-                          );
-                        } catch (e) {
-                          ws.notify(e.message, 'error');
-                        }
-                      }}
-                    >
-                      <Download size={15} />
-                    </Button>
                     {ws.canEdit && (
                       <>
                         <Button
@@ -521,16 +498,15 @@ export function AgentsPage() {
       <div className="callout">
         <Radio size={18} />
         <p>
-          Credentials are project-scoped and shown once. The backend stores their hashes. Download
-          collector configuration for OTLP metrics, logs, and traces; keep the credential in your
-          collector’s environment.
+          Each server has its own credential, shown once. We store only a hash of it, so a lost
+          credential is replaced by rotating it. Revoke an agent to cut off a server immediately.
         </p>
       </div>
       <Modal
         open={!!secret}
         onOpenChange={(v) => !v && setSecret(null)}
         title="New agent credential"
-        description="Save this value in AGENT_TOKEN in your .env file. Restart the agent afterward."
+        description="Save this value as AGENT_TOKEN in the agent’s config file, then restart the agent."
       >
         <div className="secret-value">
           <code>{secret?.token}</code>
@@ -638,7 +614,7 @@ export function UptimePage() {
               {
                 key: 'lastCheckedAt',
                 label: 'Last checked',
-                render: (r) => (r.demo ? 'Sample data' : relativeTime(r.lastCheckedAt)),
+                render: (r) => relativeTime(r.lastCheckedAt),
               },
               {
                 key: 'actions',
@@ -714,9 +690,9 @@ export function UptimePage() {
             name: 'intervalSeconds',
             label: 'Check interval (seconds)',
             type: 'number',
-            min: 60,
+            min: ws.plan.minCheckIntervalSeconds,
             max: 86400,
-            defaultValue: 60,
+            defaultValue: ws.plan.minCheckIntervalSeconds,
           },
           {
             name: 'failureThreshold',
