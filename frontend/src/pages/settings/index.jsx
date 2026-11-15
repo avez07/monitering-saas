@@ -8,10 +8,10 @@ import Plan from './Plan';
 import Account from './Account';
 
 const tabs = [
-  { to: 'team', label: 'Team', icon: Users },
-  { to: 'api-key', label: 'API key', icon: KeyRound },
-  { to: 'plan', label: 'Plan & billing', icon: CreditCard },
-  { to: 'account', label: 'Account', icon: User },
+  { to: '/settings/team', label: 'Team', icon: Users },
+  { to: '/settings/api-key', label: 'API key', icon: KeyRound },
+  { to: '/settings/plan', label: 'Plan & billing', icon: CreditCard },
+  { to: '/settings/account', label: 'Account', icon: User },
 ];
 
 export default function Settings() {
@@ -43,14 +43,14 @@ export default function Settings() {
         </nav>
         <div className="min-w-0 flex-1">
           <Routes>
-            <Route index element={<Navigate to="team" replace />} />
+            <Route index element={<Navigate to="/settings/team" replace />} />
             <Route path="team" element={<Team />} />
             <Route path="api-key" element={<ApiKey />} />
             <Route path="plan" element={<Plan />} />
             {/* Payment pages return to /settings/billing?checkout=success|cancelled */}
             <Route path="billing" element={<Plan />} />
             <Route path="account" element={<Account />} />
-            <Route path="*" element={<Navigate to="team" replace />} />
+            <Route path="*" element={<Navigate to="/settings/team" replace />} />
           </Routes>
         </div>
       </div>
