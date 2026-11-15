@@ -1,0 +1,3 @@
+# Everything in the agent is built and tested on Linux: keep LF line endings on every platform
+# (shell scripts, the systemd unit and the /proc fixtures break with CRLF).
+* text=auto eol=lf
