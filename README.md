@@ -5,19 +5,21 @@ Simple, affordable server monitoring for startups and mid-size companies on a VP
 **Start here: [START.md](START.md)** (run it, test it). **Roadmap: [PLAN.md](PLAN.md).**
 
 ```
-frontend/          React, Vite, Tailwind, TanStack Query (the dashboard)
+frontend/          React 18, Vite, Tailwind v3, shadcn/ui, TanStack Query (the dashboard)
 backend/src/       Express API, services, the background worker, Prisma repository
 backend/prisma/    Schema and migrations (PostgreSQL + TimescaleDB image)
 backend/scripts/   Development agent, Prisma runner, test-database setup
 backend/test/      Integration tests (run against a real PostgreSQL)
-e2e/               Browser tests (Playwright)
+agent/             The Go agent, installer (install.sh) and packaging (.deb, .rpm, Docker)
+site/              Marketing site, docs and troubleshooting pages (Astro)
+e2e/               Browser tests (Playwright + axe accessibility checks)
+deploy/            Production compose, Caddy, backups, load test
+docs/              API notes, runbook, billing and ops guides
 ```
 
 ## Status
 
-Phases 0 (cleanup and security baseline) and 1 (account API key, registration and metric storage) are done. The Go agent and installer, the redesigned dashboard with the "Add server" wizard, simple alerts, team invites and website checks are the next phases in [PLAN.md](PLAN.md).
-
-Today: sign up, one account API key that registers any number of servers (each server then gets its own revocable credential), a gzip JSON ingest protocol at `/v1`, 30-second metric history in a TimescaleDB hypertable with 5-minute and 1-hour rollups, a development agent (Node script) that speaks the real protocol, alert rules with email notifications, website uptime checks, plan limits, and a mock billing flow.
+All build phases are in place: accounts and teams (owner, admin, viewer), the account API key and per-server credentials, the Go agent with a one-command installer, the dashboard (Overview, Servers with 1h/24h/7d/30d charts and a Connection page, Add-server wizard, Containers, Services, Websites and APIs, Alerts with templates and contacts, Settings), email verification and invites, billing (mock provider locally), and the marketing site. See [PLAN.md](PLAN.md) for the roadmap and [START.md](START.md) to run and test everything.
 
 ## Security basics
 

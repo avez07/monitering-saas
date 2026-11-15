@@ -278,7 +278,7 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 - Update `backend/scripts/agent.mjs` to the new protocol, so the backend can be tested before the Go agent exists.
 - _Done when:_ tests cover key show-once/regenerate/revoke, register de-duplication, the plan limit on register, ingest auth, a revoked server being rejected, and the retention policy existing. One key registers 3 servers.
 
-**Phase 2 — Go agent and background service**
+✅ **Phase 2 — Go agent and background service**
 
 - `agent/`: collectors for CPU, RAM, swap, disk per mount, disk I/O, network per interface, load, uptime and top 10 processes.
 - 15-minute offline buffer, backoff with jitter, HTTPS only, `HTTPS_PROXY` support, config pull, and error reporting.
@@ -289,7 +289,7 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
   - A 10-minute backend outage back-fills.
   - `doctor` correctly reports blocked HTTPS, a wrong clock and a revoked credential.
 
-**Phase 3 — Builds, downloads and install script**
+✅ **Phase 3 — Builds, downloads and install script**
 
 - GoReleaser and GitHub Actions on `agent/v*` tags: linux amd64, arm64 and armv7 as tar.gz, deb and rpm, plus a Docker image, `checksums.txt` and a cosign signature.
 - Upload to R2, a smoke-test install, then a `latest.json` flip.
@@ -297,12 +297,12 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 - _Done when:_ fresh Ubuntu 22.04/24.04, Debian 12 and Rocky 9 (amd64, plus one arm64) go from install to first data in under 2 minutes; a tampered tarball is refused; re-install doesn't duplicate; uninstall leaves nothing behind.
 - _Needs from you:_ a Cloudflare account with R2 and the `get.` and `downloads.` DNS records. Until then, local `/downloads` works.
 
-**Phase 4 — New frontend foundation** (replaces the old "new design" phase; no mockup round, the stack and theme are fixed in 3.7)
+✅ **Phase 4 — New frontend foundation** (replaces the old "new design" phase; no mockup round, the stack and theme are fixed in 3.7)
 
 - Fresh `frontend/`: Vite + React JSX, Tailwind v3, shadcn (v3 CLI), theme variables, dark-mode toggle, API/session/query libs, app shell (sidebar from section 2, top bar with **Add server**, mobile drawer), shared components, and a route table with a page stub for every section. Project and environment pickers hidden; Agents page gone.
 - _Done when:_ `npm run build` passes; sign-in/register work against the existing API; light/dark toggle works; usable at 375 px; no Tailwind v4 syntax anywhere; old UI deleted.
 
-**Phase 5 — "Add server" wizard** (one flow replaces all connect buttons)
+✅ **Phase 5 — "Add server" wizard** (one flow replaces all connect buttons)
 
 - Steps:
   1. **Where does it run?** Ubuntu/Debian, RHEL/Rocky/Alma/Amazon Linux, Other Linux, Docker, or "I only have shared hosting", which goes to Websites. Windows and macOS show "coming soon".
@@ -312,56 +312,56 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
   5. **Waiting for your server…:** live checklist → "Connected!" → server page.
 - _Done when:_ Playwright covers signup → wizard → (simulated agent) → connected for each tab; there's no other "connect" entry point left.
 
-**Phase 6 — Connection status and troubleshooting**
+✅ **Phase 6 — Connection status and troubleshooting**
 
 - The Connection tab and the error catalog from 3.3, plus the install-events timeline.
 - The dashboard shows the status, restart, logs, doctor and uninstall commands.
 - _Done when:_ every catalog error shows a plain-language fix; tests cover blocked network (no data), revoked key, plan limit, clock skew and a collector permission error.
 
-**Phase 7 — Servers section with charts**
+✅ **Phase 7 — Servers section with charts**
 
 - A servers list (status, CPU/RAM/disk mini-bars).
 - A server detail page with 1h/24h/7d/30d charts, disk and network breakdowns and top processes.
 - Server settings (rename, edit config, remove).
 - _Done when:_ chart queries on 30 days of data take under 300 ms; all 4 ranges are e2e-tested.
 
-**Phase 8 — Alerts made simple**
+✅ **Phase 8 — Alerts made simple**
 
 - Templates, the plain-language editor, the "Where to send alerts" contacts (Email, Telegram, Slack, Discord, Webhook) with test-send, per-rule routing, time-window evaluation, the built-in offline rule and default rules.
 - _Done when:_ a 4-minute spike doesn't fire a 5-minute rule; offline alerts within 3 minutes; all 5 contact types deliver a test message; tests cover fire, recover, flap and cooldown.
 
-**Phase 9 — Team access**
+✅ **Phase 9 — Team access**
 
 - Three roles, migrating `editor` to admin and dropping `projectIds` enforcement.
 - The invite model, email, accept page, resend and cancel; remove member; plan member limits.
 - _Done when:_ e2e covers owner invites → the invitee accepts (new and existing user) → the viewer can't edit → admin removes the member and their access ends.
 
-**Phase 10 — Websites & APIs**
+✅ **Phase 10 — Websites & APIs**
 
 - A concurrent check pool, retry before marking down, keyword checks, API checks (method, headers, expected status), SSL expiry and domain expiry (RDAP), with warnings at 30, 14 and 7 days.
 - A redesigned section, and a checks-only onboarding path.
 - _Done when:_ 200 monitors finish within their interval and a down site alerts within 2 intervals.
 
-**Phase 11 — Containers (Docker)**
+✅ **Phase 11 — Containers (Docker)**
 
 - An opt-in Docker collector: container list, state, restarts, CPU and memory per container.
 - The Containers section, and the "Container stopped" template.
 - _Done when:_ starting and stopping a container shows up within 1 minute and alerts.
 
-**Phase 12 — Services**
+✅ **Phase 12 — Services**
 
 - systemd service state, process-by-name checks, local port checks, nginx/Apache status (`stub_status` / `server-status`), and Redis/MySQL/Postgres "up and responding". Deep database metrics come later, with local secrets.
 - _Done when:_ stopping nginx or MySQL shows "Stopped" and alerts within 1 minute.
 
-**Phase 13 — Marketing site, docs and account emails**
+✅ **Phase 13 — Marketing site, docs and account emails**
 
 - An Astro site (landing, features, pricing in INR and USD, docs including the troubleshooting pages, legal).
 - Email verification and password reset.
 - _Done when:_ Lighthouse scores 90+ and landing → connected server takes under 5 minutes.
 
-**Phase 14 — Production launch (free beta).** Same as v1: Hetzner, Caddy, Cloudflare, backups and a restore drill, our own monitoring, deploy and rollback, and a 500-agent load test.
+⚙️ **Phase 14 — Production launch (free beta).** Files, backups, load test done; real deployment needs your Hetzner/Cloudflare/domain accounts. Same as v1: Hetzner, Caddy, Cloudflare, backups and a restore drill, our own monitoring, deploy and rollback, and a 500-agent load test.
 
-**Phase 15 — Billing.** Same as v1: Razorpay (INR, GST) and Stripe (USD), idempotent webhooks.
+⚙️ **Phase 15 — Billing.** Code and signed webhooks done and tested with mocks; live Razorpay/Stripe keys needed. Same as v1: Razorpay (INR, GST) and Stripe (USD), idempotent webhooks.
 
 **Later:**
 
@@ -403,3 +403,7 @@ Each agent edits only the files it owns. Frontend agents: **Tailwind v3 only, JS
 | 3 | **G2: Agent collectors** | 11, 12 (Go) | `agent/internal/{docker,services}/` | G1 |
 | 3 | **B4: Billing** | 15 (Razorpay/Stripe code, signed idempotent webhooks; live keys need you) | `routes/billing.js`, `services/billing*` | B1 |
 | 4 | **QA** | end-to-end, accessibility, full customer journey, bug fixes | `e2e/`, tests | all |
+
+## 10. Status
+
+Phases 0–13 done. 14 and 15 are code-complete but need your accounts and keys. Known gaps: 24-hour agent soak, real R2/cosign/GHCR, Windows/macOS agents, deep database metrics, profile/password change APIs.

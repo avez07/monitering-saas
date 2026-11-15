@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { assert } from '../lib/errors.js';
 import { config } from '../config.js';
 import { credentialAuth } from '../services/auth.js';
+import { loadAgentContext, stillValid } from '../services/agent-cache.js';
 import { apiKeyAuth } from '../services/api-keys.js';
+import { entitlements, planLimit } from '../services/limits.js';
 import { registerServer } from '../services/agents.js';
 import { CONFIG_ID, configForAgent } from '../services/agent-config.js';
 import { recordEvent, recordDeduped, trimEvents } from '../services/agent-events.js';
@@ -16,6 +18,8 @@ const FINGERPRINT = /^[a-f0-9]{64}$/;
 const BACKFILL_WINDOW_MS = 30 * 60000; // samples buffered through an outage may be up to 30 minutes old
 const FUTURE_TOLERANCE_MS = 60000;
 const CLOCK_SKEW_MS = 120000; // beyond this, treat the agent's clock as wrong and correct its timestamps
+const LAST_SEEN_EVERY_MS = 25000;
+const SNAPSHOT_EVERY_MS = 60000;
 const SKEW_EVENT_EVERY_MS = 10 * 60000;
 
 const percent = z.number().min(0).max(100);
@@ -135,6 +139,18 @@ const installBody = z.object({
   message: z.string().max(300).default(''),
 });
 
+const REGISTER_PER_IP_HOUR = 2000;
+/** Registrations per hour for one API key: three attempts per allowed server (retries, reconnects), at least 120. */
+async function registerKeyLimit(store, orgId) {
+  try {
+    const { plan } = await entitlements(store, orgId);
+    const servers = planLimit(plan, 'servers');
+    return Number.isFinite(servers) ? Math.max(120, servers * 3) : 5000;
+  } catch {
+    return 120; // no active subscription: registration itself will be refused
+  }
+}
+
 const configInfo = (c) => ({ id: c.id, version: c.version });
 
 /**
@@ -145,8 +161,15 @@ export function v1Routes(store, limits) {
   const router = Router();
 
   router.post('/register', apiKeyAuth(store, limits), async (req, res) => {
-    await limits.use(`register:ip:${req.ip}`, 1, 60, 3600);
-    await limits.use(`register:key:${req.apiKey.id}`, 1, 120, 3600);
+    // Abuse protection lives in apiKeyAuth (failed keys per IP). Legitimate rollouts are bursty and often share
+    // one NAT address, so the IP cap is generous and the per-key cap follows the plan's server limit.
+    await limits.use(`register:ip:${req.ip}`, 1, REGISTER_PER_IP_HOUR, 3600);
+    await limits.use(
+      `register:key:${req.apiKey.id}`,
+      1,
+      await registerKeyLimit(store, req.apiKey.orgId),
+      3600,
+    );
     const input = registerBody.parse(req.body);
     const {
       agent,
@@ -195,11 +218,17 @@ export function v1Routes(store, limits) {
     res.json({ ...configInfo(setup), settings: setup.settings });
   });
 
-  router.post('/ingest', credentialAuth(store), async (req, res) => {
-    const agent = await requireAgent(store, req);
+  router.post('/ingest', async (req, res) => {
+    // Agent, resource and setup profile come from a short-lived cache (see services/agent-cache.js).
+    const cached = await loadAgentContext(
+      store,
+      (req.headers.authorization || '').replace(/^Bearer /, ''),
+    );
+    assert(stillValid(cached), 401, 'Invalid or revoked agent credential.');
+    req.credential = cached.credential;
+    const { agent, resource, setup } = cached;
     await limits.use(`ingest:${agent.id}`, 1, 30, 60);
     const input = ingestBody.parse(req.body);
-    const resource = await store.find('monitoredResource', { agentId: agent.id, type: 'server' });
     assert(resource && !resource.deletedAt, 403, 'This server was removed from your account.');
     const now = Date.now();
     const offset = now - new Date(input.sentAt).getTime();
@@ -221,20 +250,35 @@ export function v1Routes(store, limits) {
     );
 
     // Container and service snapshots describe "now"; they are stamped with the (clock-corrected) send time.
-    const reportedAt = new Date(Math.min(new Date(input.sentAt).getTime() + (skewed ? offset : 0), now));
-    if (input.containers) await recordContainers(store, agent, input.containers, { reportedAt, now });
+    const reportedAt = new Date(
+      Math.min(new Date(input.sentAt).getTime() + (skewed ? offset : 0), now),
+    );
+    if (input.containers)
+      await recordContainers(store, agent, input.containers, { reportedAt, now });
     if (input.services) await recordServices(store, agent, input.services, { reportedAt, now });
     if (input.containers || input.services) await trimStateEvents(store, agent.id, now);
 
     const newest = rows.reduce((a, b) => (b.row.time > a.row.time ? b : a), rows[0]);
     const first = agent.status === 'pending';
-    await store.update('agent', agent.id, {
-      status: 'healthy',
-      lastSeen: new Date(),
-      version: input.agent.version,
-      os: input.agent.os,
-      arch: input.agent.arch,
-    });
+    // Skip writes that would change nothing: lastSeen is refreshed at most every LAST_SEEN_EVERY_MS
+    // (well inside the 90 second online window), and everything else only when it actually differs.
+    const wrote = cached.wrote;
+    const agentSig = `${input.agent.version}|${input.agent.os}|${input.agent.arch}`;
+    if (first || agentSig !== wrote.agentSig || now - wrote.agentAt >= LAST_SEEN_EVERY_MS) {
+      const fresh = await store.client.agent.update({
+        where: { id: agent.id },
+        data: {
+          status: 'healthy',
+          lastSeen: new Date(now),
+          version: input.agent.version,
+          os: input.agent.os,
+          arch: input.agent.arch,
+        },
+      });
+      Object.assign(agent, { status: fresh.status, lastSeen: fresh.lastSeen });
+      wrote.agentAt = now;
+      wrote.agentSig = agentSig;
+    }
     if (newest) {
       const s = newest.sample;
       const snapshot = Object.fromEntries(
@@ -249,10 +293,20 @@ export function v1Routes(store, limits) {
         }).filter(([, v]) => v !== undefined),
       );
       const labels = { ...resource.labels, ...snapshot };
-      await store.update('monitoredResource', resource.id, {
-        labels,
-        status: labels.cpu > 85 || labels.memory > 90 ? 'warning' : 'healthy',
-      });
+      const status = labels.cpu > 85 || labels.memory > 90 ? 'warning' : 'healthy';
+      // The live snapshot changes every report, so it is stored at most once a minute unless the status flips.
+      if (
+        status !== resource.status ||
+        now - wrote.resourceAt >= SNAPSHOT_EVERY_MS ||
+        wrote.resourceAt === 0
+      ) {
+        const fresh = await store.client.monitoredResource.update({
+          where: { id: resource.id },
+          data: { labels, status },
+        });
+        Object.assign(resource, { labels: fresh.labels, status: fresh.status });
+        wrote.resourceAt = now;
+      }
     }
 
     // Agents repeat the same error on every send; keep one event per code every few minutes.
@@ -298,7 +352,6 @@ export function v1Routes(store, limits) {
       }).then(() => events++);
     if (events) await trimEvents(store, agent.id);
 
-    const setup = await configForAgent(store, agent);
     res.json({
       accepted,
       dropped,
@@ -321,7 +374,12 @@ async function requireAgent(store, req) {
 }
 
 const REJECTION_CODES = {
-  '/ingest': { 400: 'invalid_payload', 401: 'credential_revoked', 413: 'payload_too_large', 429: 'rate_limited' },
+  '/ingest': {
+    400: 'invalid_payload',
+    401: 'credential_revoked',
+    413: 'payload_too_large',
+    429: 'rate_limited',
+  },
   '/config': { 401: 'credential_revoked', 429: 'rate_limited' },
   '/register': { 402: 'plan_limit', 413: 'payload_too_large', 429: 'rate_limited' },
 };

@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { LoadingState } from '@/components/app/states';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { VerifyBanner } from './VerifyBanner';
 
 /** Signed-in layout: sidebar (drawer on phones), top bar and the routed page. */
 export function AppShell() {
@@ -18,6 +19,7 @@ export function AppShell() {
       <Sidebar />
       <div className="lg:pl-64">
         <Topbar />
+        <VerifyBanner />
         <main id="main" className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
           <Suspense key={pathname.split('/')[1]} fallback={<LoadingState />}>
             <Outlet />

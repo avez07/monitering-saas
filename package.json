@@ -13,7 +13,7 @@
     "build": "npm run build -w frontend",
     "start": "npm run start -w backend",
     "test": "npm run test -w backend",
-    "test:ui": "node backend/scripts/test-ui.mjs",
+    "test:e2e": "playwright test",
     "format": "prettier --write frontend/src frontend/vite.config.js backend/src backend/scripts backend/test e2e *.json *.js *.yml *.md --ignore-unknown",
     "db:generate": "npm run db:generate -w backend",
     "db:migrate": "npm run db:migrate -w backend",

@@ -3,9 +3,12 @@ import { createStore } from './data/store.js';
 import { seedPlans } from './data/seed.js';
 import { startWorkers } from './services/workers.js';
 import { registerTelegramWebhook } from './services/contacts.js';
+import { allowLoopbackForTests } from './services/uptime.js';
 
 // Background worker: website checks, alert evaluation, notification delivery, cleanup.
 // Run it as its own process (`npm run worker`); a database lease keeps it to one active worker.
+if (process.env.E2E_ALLOW_LOOPBACK === '1' && config.NODE_ENV !== 'production')
+  allowLoopbackForTests();
 const store = await createStore();
 await seedPlans(store);
 const stop = startWorkers(store);

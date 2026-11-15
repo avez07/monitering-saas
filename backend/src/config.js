@@ -42,7 +42,11 @@ const schema = z.object({
   COMPANY_STATE: z.string().default(''),
   EMAIL_PROVIDER: z.enum(['local', 'smtp']).default('local'),
   EMAIL_FROM: z.string().email().default('alerts@yuktiops.com'),
-  SMTP_HOST: z.string().default('localhost'),
+  // "localhost" is mapped to 127.0.0.1: the mail library's own DNS lookup of that name can time out on some systems.
+  SMTP_HOST: z
+    .string()
+    .default('localhost')
+    .transform((host) => (host === 'localhost' ? '127.0.0.1' : host)),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),

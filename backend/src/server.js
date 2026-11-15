@@ -3,7 +3,11 @@ import { createStore } from './data/store.js';
 import { seedPlans } from './data/seed.js';
 import { createLimits } from './services/limits.js';
 import { createApp } from './app.js';
+import { allowLoopbackForTests } from './services/uptime.js';
 
+// Browser end-to-end tests monitor a fake site on 127.0.0.1. Never honoured in production.
+if (process.env.E2E_ALLOW_LOOPBACK === '1' && config.NODE_ENV !== 'production')
+  allowLoopbackForTests();
 const store = await createStore();
 await seedPlans(store);
 const limits = createLimits();
