@@ -1,0 +1,81 @@
+# YuktiOps edge. Domains and ACME email come from the environment (see .env.production.example):
+#   APP_DOMAIN=app.yuktiops.com  API_DOMAIN=api.yuktiops.com  ACME_EMAIL=ops@yuktiops.com
+#
+# Client IPs: by default Caddy talks to browsers/agents directly, so it sets X-Forwarded-For to the real
+# peer address and the API trusts only Caddy (TRUST_PROXY = the "edge" subnet in docker-compose.prod.yml).
+# If you put Cloudflare's proxy (orange cloud) in front, uncomment the "servers" block below, fill in
+# Cloudflare's published ranges (https://www.cloudflare.com/ips-v4 and /ips-v6) and enable authenticated
+# origin pulls (docs/ops.md section 5) so nobody else can spoof CF-Connecting-IP.
+{
+	email {$ACME_EMAIL}
+	# servers {
+	# 	trusted_proxies static 173.245.48.0/20 103.21.244.0/22 ...
+	# 	client_ip_headers CF-Connecting-IP
+	# }
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+}
+
+# Browser app: static frontend, same-origin /api (session cookie) and /v1, SPA fallback to index.html.
+{$APP_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	@backend path /api/* /v1/* /downloads/*
+	handle @backend {
+		reverse_proxy api:4000 {
+			health_uri /api/health
+			health_interval 10s
+		}
+	}
+
+	handle {
+		root * /srv/app
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@html not path /assets/*
+		header @html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	request_body /api/* {
+		max_size 256KB
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Agent endpoint + health checks. Agents send gzip bodies; the API enforces its own limits.
+{$API_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy api:4000 {
+		health_uri /api/health
+		health_interval 10s
+		transport http {
+			response_header_timeout 30s
+		}
+	}
+	log {
+		output stdout
+		format json
+	}
+}

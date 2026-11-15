@@ -1,0 +1,14 @@
+# /etc/cron.d/yuktiops-backup  (install: sudo cp deploy/backup/cron.example /etc/cron.d/yuktiops-backup)
+# Runs as the deploy user (member of the docker group). Times are server time (UTC).
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=ops@yuktiops.com
+
+# Weekly full backup, Sunday 02:15
+15 2 * * 0 deploy cd /opt/yuktiops && deploy/backup/backup.sh full >> /var/log/yuktiops-backup.log 2>&1
+# Daily incremental backup, Monday-Saturday 02:15
+15 2 * * 1-6 deploy cd /opt/yuktiops && deploy/backup/backup.sh incr >> /var/log/yuktiops-backup.log 2>&1
+# Hourly: backups fresh and WAL archiving healthy (mails MAILTO on failure)
+5 * * * * deploy cd /opt/yuktiops && deploy/backup/check.sh >> /var/log/yuktiops-backup.log 2>&1
+# Monthly restore drill, first Saturday 04:00 (also do it by hand once before launch)
+0 4 1-7 * * deploy [ "$(date +\%u)" = 6 ] && cd /opt/yuktiops && deploy/backup/restore-drill.sh >> /var/log/yuktiops-backup.log 2>&1

@@ -1,0 +1,179 @@
+# Production stack for one Hetzner VM. Run from /opt/yuktiops with the env file next to this file:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# Use deploy/deploy.sh for releases (migrations, health gate, rollback); see docs/ops.md.
+name: yuktiops
+
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: '4000'
+  APP_URL: https://${APP_DOMAIN}
+  API_PUBLIC_URL: https://${API_DOMAIN}
+  TRUST_PROXY: ${TRUST_PROXY:-172.29.0.0/24}
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public&connection_limit=${DB_POOL_SIZE:-20}&pool_timeout=20
+  BILLING_PROVIDER: ${BILLING_PROVIDER:-mock}
+  BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:?set BILLING_WEBHOOK_SECRET}
+  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+  EMAIL_FROM: ${EMAIL_FROM:-alerts@yuktiops.com}
+  SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-30000}
+
+x-app-hardening: &app-hardening
+  image: ${APP_IMAGE:-yuktiops-app}:${APP_TAG:-latest}
+  build: { context: ., target: runtime }
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs: ['/tmp:size=64m']
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  logging: &logging
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+services:
+  web:
+    image: ${WEB_IMAGE:-yuktiops-web}:${APP_TAG:-latest}
+    build: { context: ., target: web }
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on:
+      api: { condition: service_healthy }
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 256M } }
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:2019/config/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+
+  api:
+    <<: *app-hardening
+    environment: *app-env
+    networks: [edge, internal]
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { cpus: '1.5', memory: 768M } }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    stop_grace_period: 20s
+
+  worker:
+    <<: *app-hardening
+    command: ['node', 'backend/src/worker.js']
+    environment: *app-env
+    # Outbound internet (uptime checks, alert email/webhooks) via the egress network; DB via internal.
+    networks: [egress, internal]
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 512M } }
+    # No HTTP port: the image's API healthcheck does not apply. Liveness is the worker lease in the database (runbook).
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+
+  db:
+    image: ${DB_IMAGE:-yuktiops-db}:${DB_TAG:-pg16-ts2.17}
+    build: { context: ./deploy/postgres }
+    init: true
+    restart: unless-stopped
+    shm_size: 256mb
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      PGBACKREST_STANZA: yuktiops
+      # The superuser is POSTGRES_USER (there is no role named postgres in this image setup).
+      PGBACKREST_PG1_USER: ${POSTGRES_USER}
+      PGBACKREST_REPO1_TYPE: ${BACKUP_REPO_TYPE:-s3}
+      PGBACKREST_REPO1_S3_ENDPOINT: ${R2_ENDPOINT:-}
+      PGBACKREST_REPO1_S3_BUCKET: ${R2_BUCKET:-}
+      PGBACKREST_REPO1_S3_REGION: auto
+      PGBACKREST_REPO1_S3_KEY: ${R2_ACCESS_KEY_ID:-}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${R2_SECRET_ACCESS_KEY:-}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?set PGBACKREST_CIPHER_PASS}
+    # WAL archiving to the repository; tuned for a 4 GB VM. Keep shared_buffers near 25% of the memory limit.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=yuktiops archive-push %p
+      - -c
+      - archive_timeout=60
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_checkpoints=on
+      - -c
+      - password_encryption=scram-sha-256
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - pgbackrest-spool:/var/spool/pgbackrest
+      - pgbackrest-log:/var/log/pgbackrest
+    networks: [internal]
+    deploy:
+      resources: { limits: { cpus: '2.0', memory: 2G } }
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+networks:
+  edge:
+    # Fixed subnet so TRUST_PROXY can name exactly the proxy network.
+    ipam: { config: [{ subnet: 172.29.0.0/24 }] }
+  egress: {}
+  # No route to the internet; only the database and its clients live here. The database publishes no port.
+  internal:
+    internal: true
+
+volumes:
+  db-data:
+  pgbackrest-spool:
+  pgbackrest-log:
+  caddy-data:
+  caddy-config:
