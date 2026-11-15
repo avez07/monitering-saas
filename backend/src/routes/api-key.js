@@ -9,19 +9,6 @@ import { agentSettingsSchema, newConfigId, ensureDefaultConfig } from '../servic
 const MAX_CONFIGS = 20;
 const name = z.string().trim().min(1).max(80);
 
-// The key registers servers for the whole organization, so a project-restricted admin may not manage it.
-function unrestricted(req, res, next) {
-  try {
-    assert(
-      !(req.context.membership.projectIds || []).length,
-      403,
-      'Only an administrator with access to every project can manage this.',
-    );
-    next();
-  } catch (error) {
-    next(error);
-  }
-}
 const describe = (key, servers = 0) => ({
   id: key.id,
   prefix: key.prefix,
@@ -33,7 +20,7 @@ const describe = (key, servers = 0) => ({
 /** The one account API key, and the setup profiles agents pull. Admin-only, cookie-authenticated. */
 export function apiKeyRoutes(store) {
   const router = Router();
-  const guard = [canAdmin, unrestricted];
+  const guard = [canAdmin];
 
   router.get('/api-key', ...guard, async (req, res) => {
     const key = await activeApiKey(store, req.context.orgId);

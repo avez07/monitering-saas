@@ -4,7 +4,6 @@ import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
 import {
   canAdmin,
-  requireMemberGrant,
   canEdit,
   permit,
   scopedRows,
@@ -13,9 +12,6 @@ import {
   requireRow,
   audit,
 } from '../services/auth.js';
-import { enforceCount, entitlements, planLimit } from '../services/limits.js';
-import { resolveTarget, checkTarget } from '../services/uptime.js';
-import { evaluateAlerts, deliverNotifications } from '../services/workers.js';
 import { billingProvider } from '../services/billing.js';
 import { revokeAgentAccess } from '../services/agents.js';
 
@@ -144,7 +140,15 @@ export function controlRoutes(store, limits) {
       await Promise.all(
         members.map(async (m) => {
           const u = await store.find('user', { id: m.userId });
-          return { ...m, name: u.name, email: u.email };
+          return {
+            id: m.id,
+            userId: m.userId,
+            orgId: m.orgId,
+            role: m.role,
+            name: u.name,
+            email: u.email,
+            createdAt: m.createdAt,
+          };
         }),
       ),
     );
@@ -152,250 +156,31 @@ export function controlRoutes(store, limits) {
   router.patch('/members/:id', canAdmin, async (req, res) => {
     const member = await requireRow(store, req.context, 'organizationMember', req.params.id);
     assert(member.role !== 'owner', 403, 'Owner membership cannot be changed here.');
-    requireMemberGrant(req.context, member.role, member.projectIds);
-    const input = z
-      .object({
-        role: z.enum(['admin', 'editor', 'viewer']),
-        projectIds: z.array(id).max(20).default([]),
-      })
-      .parse(req.body);
-    for (const p of input.projectIds) await requireProject(store, req.context, p);
-    requireMemberGrant(req.context, input.role, input.projectIds);
-    res.json(await store.update('organizationMember', member.id, input));
+    const input = z.object({ role: z.enum(['admin', 'viewer']) }).strict().parse(req.body);
+    // Only the owner manages administrators (changing one, or promoting someone to admin).
+    if (req.context.membership.role !== 'owner')
+      assert(
+        member.role !== 'admin' && input.role !== 'admin',
+        403,
+        'Only the owner can manage administrators.',
+      );
+    const updated = await store.update('organizationMember', member.id, { role: input.role });
+    await audit(store, req.context, 'member.role_changed', member.userId, { role: input.role });
+    res.json({ id: updated.id, userId: updated.userId, orgId: updated.orgId, role: updated.role });
   });
   router.delete('/members/:id', canAdmin, async (req, res) => {
     const member = await requireRow(store, req.context, 'organizationMember', req.params.id);
-    requireMemberGrant(req.context, member.role, member.projectIds);
     assert(
       member.role !== 'owner' && member.userId !== req.context.user.id,
       403,
       'You cannot remove this membership.',
     );
+    if (req.context.membership.role !== 'owner')
+      assert(member.role !== 'admin', 403, 'Only the owner can remove administrators.');
+    // Access ends on their very next request: every request re-reads the membership.
     await store.remove('organizationMember', member.id);
     await audit(store, req.context, 'member.removed', member.userId);
     res.status(204).end();
-  });
-  router.get('/alerts', async (req, res) =>
-    res.json({
-      rules: await scopedRows(store, req.context, 'alertRule'),
-      incidents: (await scopedRows(store, req.context, 'alertIncident')).sort(
-        (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
-      ),
-    }),
-  );
-  const ruleInput = z.object({
-    name,
-    projectId: id,
-    metric: z.enum([
-      'cpu',
-      'memory',
-      'disk',
-      'restarts',
-      'errorRate',
-      'p95',
-      'availability',
-      'certificateDays',
-    ]),
-    operator: z.enum(['gt', 'lt']).default('gt'),
-    threshold: z.coerce.number().finite(),
-    durationSeconds: z.coerce.number().int().min(0).max(3600).default(60),
-    cooldownSeconds: z.coerce.number().int().min(60).max(86400).default(300),
-    severity: z.enum(['warning', 'critical']).default('warning'),
-    enabled: z.boolean().default(true),
-  });
-  router.post('/alerts/rules', canEdit, async (req, res) => {
-    const input = ruleInput.parse(req.body);
-    await requireProject(store, req.context, input.projectId);
-    await enforceCount(
-      store,
-      req.context.orgId,
-      'alertRules',
-      (await store.list('alertRule', { orgId: req.context.orgId })).length,
-    );
-    const row = await store.create('alertRule', { ...input, orgId: req.context.orgId });
-    await audit(store, req.context, 'alert_rule.created', row.name);
-    res.status(201).json(row);
-  });
-  router.patch('/alerts/rules/:id', canEdit, async (req, res) => {
-    const rule = await requireRow(store, req.context, 'alertRule', req.params.id);
-    const input = z
-      .object({ enabled: z.boolean().optional(), silenceUntil: nullableDate.optional() })
-      .parse(req.body);
-    res.json(await store.update('alertRule', rule.id, input));
-  });
-  router.delete('/alerts/rules/:id', canEdit, async (req, res) => {
-    const row = await requireRow(store, req.context, 'alertRule', req.params.id);
-    await store.update('alertRule', row.id, { enabled: false });
-    res.status(204).end();
-  });
-  router.patch('/alerts/incidents/:id', canEdit, async (req, res) => {
-    const incident = await requireRow(store, req.context, 'alertIncident', req.params.id);
-    const { state } = z.object({ state: z.enum(['acknowledged', 'resolved']) }).parse(req.body);
-    res.json(
-      await store.update('alertIncident', incident.id, {
-        state,
-        ...(state === 'resolved' ? { resolvedAt: new Date().toISOString() } : {}),
-      }),
-    );
-  });
-  router.post('/alerts/evaluate', canEdit, async (req, res) => {
-    await limits.use(`evaluate:${req.context.orgId}`, 1, 5);
-    await evaluateAlerts(store, req.context.orgId);
-    await deliverNotifications(store, req.context.orgId);
-    res.json({ message: 'Alert evaluation completed.' });
-  });
-  router.get('/notifications', canAdmin, async (req, res) =>
-    res.json({
-      channels: await store.list('notificationChannel', { orgId: req.context.orgId }),
-      deliveries: (await store.list('notificationDelivery', { orgId: req.context.orgId }))
-        .slice(-100)
-        .reverse(),
-      provider: config.EMAIL_PROVIDER,
-    }),
-  );
-  router.post('/notifications/channels', canAdmin, async (req, res) => {
-    const input = z.object({ name, address: z.string().email() }).parse(req.body);
-    res.status(201).json(
-      await store.create('notificationChannel', {
-        ...input,
-        orgId: req.context.orgId,
-        type: 'email',
-        enabled: true,
-      }),
-    );
-  });
-  router.patch('/notifications/channels/:id', canAdmin, async (req, res) => {
-    const row = await requireRow(store, req.context, 'notificationChannel', req.params.id);
-    res.json(
-      await store.update(
-        'notificationChannel',
-        row.id,
-        z.object({ enabled: z.boolean() }).parse(req.body),
-      ),
-    );
-  });
-  router.get('/uptime', async (req, res) =>
-    res.json(await scopedRows(store, req.context, 'uptimeMonitor')),
-  );
-  router.post('/uptime', canEdit, async (req, res) => {
-    const input = z
-      .object({
-        name,
-        projectId: id,
-        target: z.string().url().max(2048),
-        intervalSeconds: z.coerce.number().int().min(60).max(86400).default(60),
-        failureThreshold: z.coerce.number().int().min(1).max(10).default(3),
-      })
-      .parse(req.body);
-    await requireProject(store, req.context, input.projectId);
-    await resolveTarget(input.target);
-    const { plan } = await entitlements(store, req.context.orgId);
-    assert(
-      input.intervalSeconds >= plan.minCheckIntervalSeconds,
-      402,
-      `Your ${plan.name} plan checks at most every ${plan.minCheckIntervalSeconds} seconds.`,
-    );
-    await enforceCount(
-      store,
-      req.context.orgId,
-      'monitors',
-      (await store.list('uptimeMonitor', { orgId: req.context.orgId })).length,
-    );
-    res.status(201).json(
-      await store.create('uptimeMonitor', {
-        ...input,
-        orgId: req.context.orgId,
-        enabled: true,
-        status: 'pending',
-        consecutiveFailures: 0,
-      }),
-    );
-  });
-  router.get('/uptime/:id/checks', async (req, res) => {
-    const monitor = await requireRow(store, req.context, 'uptimeMonitor', req.params.id);
-    res.json(
-      (await store.list('uptimeCheck', { orgId: req.context.orgId, monitorId: monitor.id }))
-        .slice(-100)
-        .reverse(),
-    );
-  });
-  router.post('/uptime/:id/check', canEdit, async (req, res) => {
-    const monitor = await requireRow(store, req.context, 'uptimeMonitor', req.params.id);
-    await limits.use(`uptime:${req.context.orgId}`, 1, 10);
-    const result = await checkTarget(monitor.target);
-    await store.create('uptimeCheck', {
-      orgId: req.context.orgId,
-      monitorId: monitor.id,
-      ...result,
-    });
-    await store.update('uptimeMonitor', monitor.id, {
-      status: result.ok ? 'healthy' : 'unhealthy',
-      latencyMs: result.latencyMs,
-      lastCheckedAt: new Date().toISOString(),
-    });
-    res.json(result);
-  });
-  router.patch('/uptime/:id', canEdit, async (req, res) => {
-    const row = await requireRow(store, req.context, 'uptimeMonitor', req.params.id);
-    res.json(
-      await store.update(
-        'uptimeMonitor',
-        row.id,
-        z.object({ enabled: z.boolean() }).parse(req.body),
-      ),
-    );
-  });
-  router.delete('/uptime/:id', canEdit, async (req, res) => {
-    const row = await requireRow(store, req.context, 'uptimeMonitor', req.params.id);
-    await store.remove('uptimeMonitor', row.id);
-    res.status(204).end();
-  });
-  router.get('/billing', permit('owner', 'admin'), async (req, res) =>
-    res.json({
-      plans: await store.list('subscriptionPlan'),
-      subscription: await store.find('subscription', { orgId: req.context.orgId }),
-      invoices: await store.list('invoice', { orgId: req.context.orgId }),
-      provider: billingProvider.name,
-    }),
-  );
-  router.post('/billing/change', permit('owner'), async (req, res) => {
-    const input = z.object({ planId: id, interval: z.enum(['monthly', 'annual']) }).parse(req.body);
-    const plan = await store.find('subscriptionPlan', { id: input.planId });
-    assert(plan, 404, 'Plan not found.');
-    assert(
-      (await store.list('monitoredResource', { orgId: req.context.orgId, type: 'server' })).filter(
-        (r) => !r.deletedAt,
-      ).length <= planLimit(plan, 'servers'),
-      400,
-      'Remove servers before downgrading below the included server limit.',
-    );
-    assert(
-      (await store.list('uptimeMonitor', { orgId: req.context.orgId })).length <= plan.monitors,
-      400,
-      'Remove website checks before downgrading.',
-    );
-    assert(
-      (await store.list('organizationMember', { orgId: req.context.orgId })).length <= plan.members,
-      400,
-      'Remove team members before downgrading.',
-    );
-    assert(
-      (await store.list('alertRule', { orgId: req.context.orgId })).length <= plan.alertRules,
-      400,
-      'Remove alert rules before downgrading.',
-    );
-    const invoice = await billingProvider.changeSubscription(
-      store,
-      req.context.orgId,
-      plan,
-      input.interval,
-    );
-    await audit(store, req.context, 'subscription.changed', plan.name, { provider: 'mock' });
-    res.json({ invoice, message: 'Plan updated. No money was charged (billing is not live yet).' });
-  });
-  router.post('/billing/cancel', permit('owner'), async (req, res) => {
-    const row = await store.find('subscription', { orgId: req.context.orgId });
-    res.json(await store.update('subscription', row.id, { cancelAtPeriodEnd: true }));
   });
   router.get('/settings', canAdmin, async (req, res) =>
     res.json(await store.find('organization', { id: req.context.orgId })),

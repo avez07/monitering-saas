@@ -23,3 +23,29 @@ export async function trimEvents(store, agentId, keep = MAX_EVENTS_PER_AGENT) {
   if (!stale.length) return 0;
   return store.removeMany('agentEvent', { id: { in: stale.map((e) => e.id) } });
 }
+
+export const DEDUPE_MS = 5 * 60000;
+
+/**
+ * Record an event unless the same code was already recorded for the same server (or, before it has
+ * one, the same install fingerprint) in the last few minutes, so a flapping agent cannot flood the log.
+ */
+export async function recordDeduped(store, event, windowMs = DEDUPE_MS) {
+  const who = event.agentId
+    ? { agentId: event.agentId }
+    : { agentId: null, fingerprint: event.fingerprint ?? null };
+  const recent = await store.client.agentEvent.findFirst({
+    where: {
+      orgId: event.orgId,
+      code: event.code,
+      source: event.source,
+      createdAt: { gt: new Date(Date.now() - windowMs) },
+      ...who,
+    },
+    select: { id: true },
+  });
+  if (recent) return null;
+  const row = await recordEvent(store, event);
+  if (event.agentId) await trimEvents(store, event.agentId);
+  return row;
+}

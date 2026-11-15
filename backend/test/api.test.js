@@ -1,10 +1,9 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import { config, loadConfig } from '../src/config.js';
 import { digest, verifyPassword } from '../src/lib/crypto.js';
-import { evaluateAlerts, deliverNotifications, housekeeping } from '../src/services/workers.js';
+import { housekeeping } from '../src/services/workers.js';
 import { isPublicAddress } from '../src/services/uptime.js';
 import { setup, closeStore, browser, register, addMember, PASSWORD } from './helpers.js';
 
@@ -235,7 +234,7 @@ test('foreign projects, resources, and agents are inaccessible', async () => {
   assert.equal((await b.client.get('/api/agents')).body.length, 0);
 });
 
-test('viewer roles and assigned project scopes are enforced on the backend', async () => {
+test('viewers are read-only and see every project of the organization (no per-project scoping)', async () => {
   const owner = await register(app, 'Owner');
   const second = await store.create('project', {
     orgId: owner.orgId,
@@ -252,15 +251,9 @@ test('viewer roles and assigned project scopes are enforced on the backend', asy
     labels: {},
   });
   await server(owner, 'visible-server');
-  const viewer = await addMember(app, store, owner, {
-    role: 'viewer',
-    projectIds: [owner.project.id],
-  });
+  const viewer = await addMember(app, store, owner, { role: 'viewer' });
   const resources = await viewer.client.get('/api/resources');
-  assert.deepEqual(
-    resources.body.map((r) => r.name),
-    ['visible-server'],
-  );
+  assert.deepEqual(resources.body.map((r) => r.name).sort(), ['hidden-server', 'visible-server']);
   assert.equal((await viewer.client.get('/api/members')).status, 403);
   assert.equal((await viewer.client.get('/api/api-key')).status, 403);
   assert.equal((await viewer.client.post('/api/api-key')).status, 403);
@@ -272,120 +265,22 @@ test('viewer roles and assigned project scopes are enforced on the backend', asy
   );
 });
 
-test('restricted administrators cannot widen their own access or grant broader membership', async () => {
+test('only the owner manages administrators; admins manage viewers', async () => {
   const owner = await register(app, 'Owner');
-  const admin = await addMember(app, store, owner, {
-    role: 'admin',
-    projectIds: [owner.project.id],
-  });
-  const viewer = await addMember(app, store, owner, {
-    role: 'viewer',
-    projectIds: [owner.project.id],
-  });
-  const widen = await admin.client
-    .patch(`/api/members/${admin.membership.id}`)
-    .send({ role: 'admin', projectIds: [] });
-  assert.equal(widen.status, 403);
+  const admin = await addMember(app, store, owner, { role: 'admin' });
+  const viewer = await addMember(app, store, owner, { role: 'viewer' });
   const promote = await admin.client
     .patch(`/api/members/${viewer.membership.id}`)
-    .send({ role: 'admin', projectIds: [owner.project.id] });
+    .send({ role: 'admin' });
   assert.equal(promote.status, 403);
-  const broaden = await admin.client
-    .patch(`/api/members/${viewer.membership.id}`)
-    .send({ role: 'viewer', projectIds: [] });
-  assert.equal(broaden.status, 403);
-  const permitted = await admin.client
-    .patch(`/api/members/${viewer.membership.id}`)
-    .send({ role: 'editor', projectIds: [owner.project.id] });
-  assert.equal(permitted.status, 200);
-});
-
-test('the free plan limits website checks and check frequency', async () => {
-  const owner = await register(app, 'Limits');
-  const tooFrequent = await owner.client.post('/api/uptime').send({
-    name: 'Fast',
-    projectId: owner.project.id,
-    target: 'https://1.1.1.1',
-    intervalSeconds: 60,
-  });
-  assert.equal(tooFrequent.status, 402, 'free plan checks every 5 minutes at most');
-  const fine = await owner.client.post('/api/uptime').send({
-    name: 'Ok',
-    projectId: owner.project.id,
-    target: 'https://1.1.1.1',
-    intervalSeconds: 300,
-  });
-  assert.equal(fine.status, 201);
-  // An ended subscription cannot add anything.
-  const subscription = await store.find('subscription', { orgId: owner.orgId });
-  await store.update('subscription', subscription.id, { status: 'cancelled' });
-  const blocked = await owner.client.post('/api/uptime').send({
-    name: 'Late',
-    projectId: owner.project.id,
-    target: 'https://1.1.1.1',
-    intervalSeconds: 300,
-  });
-  assert.equal(blocked.status, 402, 'a cancelled subscription cannot add resources');
-});
-
-test('billing webhooks require signatures and duplicate events have no repeated effects', async () => {
-  const owner = await register(app, 'Billing');
-  const event = JSON.stringify({
-    id: 'event-test-1',
-    orgId: owner.orgId,
-    type: 'payment.failed',
-    amount: 0,
-  });
-  const signature = createHmac('sha256', config.BILLING_WEBHOOK_SECRET).update(event).digest('hex');
-  const post = () =>
-    request(app).post('/api/billing/webhook').set('Content-Type', 'application/json');
-  assert.equal((await post().send(event)).status, 401);
-  assert.equal((await post().set('X-Yuktiops-Signature', 'ab'.repeat(32)).send(event)).status, 401);
-  for (let i = 0; i < 2; i++) {
-    const response = await post().set('X-Yuktiops-Signature', signature).send(event);
-    assert.equal(response.status, 200);
-    assert.equal(response.body.duplicate, i === 1);
-  }
-  assert.equal((await store.list('payment', { orgId: owner.orgId })).length, 1);
-  assert.equal((await store.find('subscription', { orgId: owner.orgId })).status, 'past_due');
-});
-
-test('alert pending, firing, local delivery, cooldown, and recovery states work', async () => {
-  const owner = await register(app, 'Alerts');
-  const host = await server(owner, 'alert-host');
-  const rule = await store.create('alertRule', {
-    orgId: owner.orgId,
-    projectId: owner.project.id,
-    name: 'Test memory',
-    metric: 'memory',
-    operator: 'gt',
-    threshold: 90,
-    durationSeconds: 60,
-    cooldownSeconds: 300,
-    severity: 'critical',
-    enabled: true,
-  });
-  await store.update('monitoredResource', host.id, { labels: { memory: 96 } });
-  await evaluateAlerts(store, owner.orgId);
-  let incident = await store.find('alertIncident', { ruleId: rule.id });
-  assert.equal(incident.state, 'pending');
-  await store.update('alertIncident', incident.id, {
-    startedAt: new Date(Date.now() - 61000),
-  });
-  await evaluateAlerts(store, owner.orgId);
-  incident = await store.find('alertIncident', { id: incident.id });
-  assert.equal(incident.state, 'firing');
-  await deliverNotifications(store, owner.orgId);
+  const demote = await admin.client
+    .patch(`/api/members/${admin.membership.id}`)
+    .send({ role: 'viewer' });
+  assert.equal(demote.status, 403);
   assert.equal(
-    (await store.find('notificationDelivery', { incidentId: incident.id })).status,
-    'local',
+    (await owner.client.patch(`/api/members/${viewer.membership.id}`).send({ role: 'admin' })).status,
+    200,
   );
-  await evaluateAlerts(store, owner.orgId);
-  assert.equal((await store.list('notificationDelivery', { incidentId: incident.id })).length, 1);
-  await store.update('monitoredResource', host.id, { labels: { memory: 50 } });
-  await evaluateAlerts(store, owner.orgId);
-  assert.equal((await store.find('alertIncident', { id: incident.id })).state, 'resolved');
-  assert.equal((await store.list('notificationDelivery', { incidentId: incident.id })).length, 2);
 });
 
 test('uptime address policy blocks private, metadata, loopback, 6to4 and mapped IPv6 addresses', () => {

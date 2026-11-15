@@ -6,6 +6,7 @@ import { hashPassword } from '../src/lib/crypto.js';
 import { Limits } from '../src/services/limits.js';
 import { config } from '../src/config.js';
 import { testDatabaseUrl } from './db-url.js';
+import { useMemoryMail } from '../src/services/mail.js';
 
 export const PASSWORD = 'correct-horse-battery';
 let counter = 0;
@@ -23,6 +24,7 @@ export async function setup() {
   const list = tables.map((t) => `"${t.tablename}"`).join(', ');
   await store.client.$executeRawUnsafe(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
   await seedPlans(store);
+  useMemoryMail(); // account emails are captured in `outbox`, never sent
   const limits = new Limits();
   return { store, limits, app: createApp(store, limits) };
 }

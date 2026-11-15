@@ -24,86 +24,149 @@ export function isPublicAddress(address) {
     (a === 203 && b === 0 && c === 113)
   );
 }
-export async function resolveTarget(target) {
-  const url = new URL(target);
+
+// Test-only escape hatch: lets integration tests talk to a fake server on 127.0.0.1. Production never
+// calls this, and it only ever opens loopback, not private networks or cloud metadata addresses.
+let loopbackForTests = false;
+export function allowLoopbackForTests(on = true) {
+  loopbackForTests = on;
+}
+const addressAllowed = (address) =>
+  isPublicAddress(address) || (loopbackForTests && (address === '127.0.0.1' || address === '::1'));
+
+/** Resolve a URL's host and refuse anything that is not a public address. */
+export async function resolveTarget(target, protocols = ['http:', 'https:', 'tcp:']) {
+  let url;
+  try {
+    url = new URL(target);
+  } catch {
+    assert(false, 400, 'Enter a valid address.');
+  }
   assert(
-    ['http:', 'https:', 'tcp:'].includes(url.protocol) && !url.username && !url.password,
+    protocols.includes(url.protocol) && !url.username && !url.password,
     400,
-    'Use an HTTP, HTTPS, or TCP URL without credentials.',
+    'Use an HTTP or HTTPS address without a username or password.',
   );
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = await lookup(host, { all: true, verbatim: true });
+  let addresses;
+  try {
+    addresses = await lookup(host, { all: true, verbatim: true });
+  } catch {
+    assert(false, 400, 'We could not find that address (DNS lookup failed).');
+  }
   assert(
-    addresses.length && addresses.every((a) => isPublicAddress(a.address)),
+    addresses.length && addresses.every((a) => addressAllowed(a.address)),
     400,
-    'Uptime checks require a publicly routable address.',
+    'Checks require a publicly routable address.',
   );
   return { url, address: addresses[0] };
 }
-export async function checkTarget(target) {
+
+const codeOf = (error) => {
+  const code = error?.code || error?.message || 'error';
+  if (/ENOTFOUND|EAI_AGAIN/.test(code)) return 'dns';
+  if (/ECONNREFUSED/.test(code)) return 'connection_refused';
+  if (/ECONNRESET|EPIPE/.test(code)) return 'connection_reset';
+  if (/ETIMEDOUT|timeout/i.test(code)) return 'timeout';
+  if (/CERT|TLS|SSL|DEPTH_ZERO|UNABLE_TO_VERIFY|ERR_TLS/i.test(code)) return 'tls';
+  return String(code).slice(0, 60);
+};
+export const errorCode = codeOf;
+
+/**
+ * One guarded HTTP(S) request. The host is resolved once, vetted, and then pinned for the connection,
+ * so DNS rebinding between the check and the connect cannot reach a private address. Redirects are only
+ * followed when asked, and every hop is vetted again.
+ * Returns { status, headers, body, latencyMs, certificateExpiresAt }; throws an Error whose `.code` is short.
+ */
+export async function safeRequest(target, options = {}) {
+  const {
+    method = 'GET',
+    headers = {},
+    body,
+    timeoutMs = 8000,
+    maxBytes = 0,
+    maxRedirects = 0,
+  } = options;
   const started = performance.now();
-  try {
-    const { url, address } = await resolveTarget(target);
-    if (url.protocol === 'tcp:')
-      return await new Promise((resolve) => {
-        const socket = createConnection({
-          host: address.address,
-          port: Number(url.port || 443),
-          timeout: 8000,
-        });
-        const finish = (ok, error) => {
-          socket.destroy();
-          resolve({
-            ok,
-            latencyMs: Math.round(performance.now() - started),
-            statusCode: ok ? 200 : 0,
-            error,
-          });
-        };
-        socket.once('connect', () => finish(true));
-        socket.once('error', (e) => finish(false, e.code));
-        socket.once('timeout', () => finish(false, 'Timeout'));
-      });
-    return await new Promise((resolve) => {
-      const transport = url.protocol === 'https:' ? https : http;
-      const request = transport.request(
-        url,
-        {
-          method: 'GET',
-          timeout: 8000,
-          lookup: (host, options, callback) =>
-            options?.all
-              ? callback(null, [address])
-              : callback(null, address.address, address.family),
-          headers: { 'user-agent': 'YuktiOpsUptime/0.1', range: 'bytes=0-1023' },
-        },
-        (response) => {
-          const certificate = response.socket.getPeerCertificate?.();
-          const expiresAt = certificate?.valid_to
-            ? new Date(certificate.valid_to).toISOString()
-            : null;
-          const result = {
-            ok: response.statusCode >= 200 && response.statusCode < 400,
-            statusCode: response.statusCode,
-            latencyMs: Math.round(performance.now() - started),
-            certificateExpiresAt: expiresAt,
-          };
-          response.destroy();
-          resolve(result);
-        },
-      );
-      request.on('error', (error) =>
-        resolve({
-          ok: false,
-          statusCode: 0,
-          latencyMs: Math.round(performance.now() - started),
-          error: error.code || error.message,
-        }),
-      );
-      request.on('timeout', () => request.destroy(new Error('Timeout')));
-      request.end();
-    });
-  } catch (error) {
-    return { ok: false, statusCode: 0, latencyMs: 0, error: error.message };
+  let current = target;
+  for (let hop = 0; ; hop++) {
+    const result = await once(current, { method, headers, body, timeoutMs, maxBytes });
+    const location = result.headers.location;
+    if (result.status >= 300 && result.status < 400 && location && hop < maxRedirects) {
+      current = new URL(location, current).toString();
+      continue;
+    }
+    return { ...result, latencyMs: Math.round(performance.now() - started) };
   }
+}
+async function once(target, { method, headers, body, timeoutMs, maxBytes }) {
+  const { url, address } = await resolveTarget(target, ['http:', 'https:']);
+  return new Promise((resolve, reject) => {
+    const transport = url.protocol === 'https:' ? https : http;
+    const request = transport.request(
+      url,
+      {
+        method,
+        timeout: timeoutMs,
+        lookup: (host, opts, callback) =>
+          opts?.all ? callback(null, [address]) : callback(null, address.address, address.family),
+        headers: {
+          'user-agent': 'YuktiOpsUptime/1.0',
+          ...headers,
+          ...(body != null ? { 'content-length': Buffer.byteLength(body) } : {}),
+        },
+      },
+      (response) => {
+        const certificate = response.socket.getPeerCertificate?.();
+        const certificateExpiresAt = certificate?.valid_to
+          ? new Date(certificate.valid_to).toISOString()
+          : null;
+        const done = (text) =>
+          resolve({
+            status: response.statusCode,
+            headers: response.headers,
+            body: text,
+            certificateExpiresAt,
+          });
+        if (!maxBytes) {
+          response.destroy();
+          return done('');
+        }
+        const chunks = [];
+        let size = 0;
+        response.on('data', (chunk) => {
+          chunks.push(chunk);
+          size += chunk.length;
+          if (size > maxBytes) response.destroy();
+        });
+        response.on('close', () => done(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
+        response.on('error', () => done(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
+      },
+    );
+    request.on('error', (error) => reject(Object.assign(new Error(codeOf(error)), { code: codeOf(error) })));
+    request.on('timeout', () => request.destroy(Object.assign(new Error('timeout'), { code: 'timeout' })));
+    request.end(body ?? undefined);
+  });
+}
+
+/** Open a TCP connection to a vetted public address. Resolves with latency or rejects with a short code. */
+export async function tcpConnect(host, port, timeoutMs = 8000) {
+  const started = performance.now();
+  const { address } = await resolveTarget(`tcp://${host.includes(':') ? `[${host}]` : host}:${port}`);
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: address.address, port, timeout: timeoutMs });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve({ latencyMs: Math.round(performance.now() - started) });
+    });
+    socket.once('error', (e) => {
+      socket.destroy();
+      reject(Object.assign(new Error(codeOf(e)), { code: codeOf(e) }));
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      reject(Object.assign(new Error('timeout'), { code: 'timeout' }));
+    });
+  });
 }

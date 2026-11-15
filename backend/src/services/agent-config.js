@@ -2,6 +2,26 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
 const flag = z.boolean().default(true);
+
+/** What an agent may be asked to watch (Phase 12). Only names, ports and local status URLs; never credentials. */
+const hostName = z.string().max(253).regex(/^[A-Za-z0-9._:-]+$/, 'Use a host name or IP address.');
+const serviceName = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9 @._:/+-]+$/, 'Use letters, digits and . _ - @ : / +');
+const statusUrl = z
+  .string()
+  .max(300)
+  .url()
+  .refine((u) => /^https?:\/\//i.test(u), 'Use an http or https URL.');
+const portNumber = z.number().int().min(1).max(65535);
+const serviceEntry = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('systemd'), name: serviceName }).strict(),
+  z.object({ kind: z.literal('process'), name: serviceName }).strict(),
+  z.object({ kind: z.literal('port'), name: serviceName, port: portNumber, host: hostName.optional() }).strict(),
+  z.object({ kind: z.literal('nginx'), name: serviceName, url: statusUrl }).strict(),
+  z.object({ kind: z.literal('apache'), name: serviceName, url: statusUrl }).strict(),
+  ...['mysql', 'postgres', 'redis'].map((kind) =>
+    z.object({ kind: z.literal(kind), name: serviceName, port: portNumber.optional(), host: hostName.optional() }).strict(),
+  ),
+]);
 /**
  * What a setup profile may contain. Remote settings can only switch built-in, read-only collectors
  * on or off and change reporting intervals. The agent never executes anything it is sent.
@@ -20,6 +40,14 @@ export const agentSettingsSchema = z
         network: flag,
         load: flag,
         processes: flag,
+        docker: z.boolean().default(false),
+        services: z
+          .array(serviceEntry)
+          .max(50)
+          .default([])
+          .refine((list) => new Set(list.map((s) => `${s.kind}:${s.name.toLowerCase()}`)).size === list.length, {
+            message: 'Each service kind and name may be listed only once.',
+          }),
       })
       .strict()
       .default({}),

@@ -6,8 +6,11 @@ import { credentialAuth } from '../services/auth.js';
 import { apiKeyAuth } from '../services/api-keys.js';
 import { registerServer } from '../services/agents.js';
 import { CONFIG_ID, configForAgent } from '../services/agent-config.js';
-import { recordEvent, trimEvents } from '../services/agent-events.js';
+import { recordEvent, recordDeduped, trimEvents } from '../services/agent-events.js';
+import { digest } from '../lib/crypto.js';
 import { insertSamples, sampleToRow } from '../services/metrics.js';
+import { recordContainers, trimStateEvents } from '../services/containers.js';
+import { recordServices, SERVICE_KINDS, SERVICE_STATES } from '../services/services.js';
 
 const FINGERPRINT = /^[a-f0-9]{64}$/;
 const BACKFILL_WINDOW_MS = 30 * 60000; // samples buffered through an outage may be up to 30 minutes old
@@ -60,6 +63,32 @@ const sample = z.object({
     })
     .optional(),
 });
+const bytes = z.number().min(0).max(1e16);
+const container = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/),
+  name: z
+    .string()
+    .max(200)
+    .transform((n) => n.replace(/^\/+/, ''))
+    .pipe(z.string().min(1)),
+  image: z.string().max(300).default(''),
+  state: z.enum(['running', 'paused', 'restarting', 'exited', 'created', 'dead', 'removing']),
+  status: z.string().max(200).optional(),
+  restartCount: z.number().int().min(0).max(1e9).default(0),
+  cpuPercent: z.number().min(0).max(1e5).optional(),
+  memoryBytes: bytes.optional(),
+  memoryLimitBytes: bytes.optional(),
+  startedAt: z.string().datetime({ offset: true }).optional(),
+  oomKilled: z.boolean().optional(),
+});
+const service = z.object({
+  name: z.string().trim().min(1).max(100),
+  kind: z.enum(SERVICE_KINDS),
+  state: z.enum(SERVICE_STATES),
+  detail: z.string().max(200).optional(),
+  responseMs: z.number().min(0).max(600000).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+});
 const ingestBody = z.object({
   sentAt: z.string().datetime({ offset: true }),
   agent: z.object({
@@ -70,6 +99,9 @@ const ingestBody = z.object({
     ramBytes: z.number().min(0).max(1e16).optional(),
   }),
   samples: z.array(sample).min(1).max(120),
+  // Optional snapshots (see docs/api/agent-ingest-extensions.md): present means complete, absent means off.
+  containers: z.array(container).max(100).optional(),
+  services: z.array(service).max(100).optional(),
   errors: z
     .array(
       z.object({
@@ -188,6 +220,12 @@ export function v1Routes(store, limits) {
       rows.map((r) => r.row),
     );
 
+    // Container and service snapshots describe "now"; they are stamped with the (clock-corrected) send time.
+    const reportedAt = new Date(Math.min(new Date(input.sentAt).getTime() + (skewed ? offset : 0), now));
+    if (input.containers) await recordContainers(store, agent, input.containers, { reportedAt, now });
+    if (input.services) await recordServices(store, agent, input.services, { reportedAt, now });
+    if (input.containers || input.services) await trimStateEvents(store, agent.id, now);
+
     const newest = rows.reduce((a, b) => (b.row.time > a.row.time ? b : a), rows[0]);
     const first = agent.status === 'pending';
     await store.update('agent', agent.id, {
@@ -217,15 +255,19 @@ export function v1Routes(store, limits) {
       });
     }
 
-    let events = input.errors.length;
+    // Agents repeat the same error on every send; keep one event per code every few minutes.
+    let events = 0;
     for (const e of input.errors)
-      await recordEvent(store, {
-        orgId: agent.orgId,
-        agentId: agent.id,
-        source: 'agent',
-        code: e.code,
-        message: e.message,
-      });
+      if (
+        await recordDeduped(store, {
+          orgId: agent.orgId,
+          agentId: agent.id,
+          source: 'agent',
+          code: e.code,
+          message: e.message,
+        })
+      )
+        events++;
     if (skewed) {
       const recent = await store.client.agentEvent.findFirst({
         where: {
@@ -276,4 +318,49 @@ async function requireAgent(store, req) {
   const agent = await store.find('agent', { id: agentId });
   assert(agent && agent.status !== 'revoked', 401, 'This server has been disconnected.');
   return agent;
+}
+
+const REJECTION_CODES = {
+  '/ingest': { 400: 'invalid_payload', 401: 'credential_revoked', 413: 'payload_too_large', 429: 'rate_limited' },
+  '/config': { 401: 'credential_revoked', 429: 'rate_limited' },
+  '/register': { 402: 'plan_limit', 413: 'payload_too_large', 429: 'rate_limited' },
+};
+
+/**
+ * Error middleware for /v1: when we reject a request from a known server (revoked credential, over a
+ * limit, too large, invalid), remember why so the Connection page can explain it. Unknown callers are
+ * not recorded, so random traffic cannot fill the table. Repeats within 5 minutes are collapsed.
+ */
+export function v1ErrorRecorder(store) {
+  return async (error, req, res, next) => {
+    try {
+      const status = error.status || (error.name === 'ZodError' ? 400 : 0);
+      let code = REJECTION_CODES[req.path]?.[status];
+      if (status === 403 && req.path === '/ingest' && /removed/.test(error.message))
+        code = 'server_removed';
+      if (code) {
+        const raw = (req.headers.authorization || '').replace(/^Bearer /, '');
+        const credential = raw.startsWith('agent_')
+          ? await store.find('agentCredential', { tokenHash: digest(raw) })
+          : null;
+        const fingerprint = FINGERPRINT.test(req.body?.fingerprint) ? req.body.fingerprint : null;
+        const target = credential?.agentId
+          ? { orgId: credential.orgId, agentId: credential.agentId }
+          : req.apiKey && fingerprint
+            ? { orgId: req.apiKey.orgId, agentId: null, fingerprint }
+            : null;
+        if (target)
+          await recordDeduped(store, {
+            ...target,
+            source: 'server',
+            code,
+            message: String(error.message).slice(0, 300),
+            details: { status, path: `/v1${req.path}` },
+          });
+      }
+    } catch (recordError) {
+      console.error('[v1] could not record rejection:', recordError.message);
+    }
+    next(error);
+  };
 }

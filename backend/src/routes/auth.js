@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
 import { hashPassword, verifyPassword, burnPasswordCheck } from '../lib/crypto.js';
 import { defaultSettings, newConfigId } from '../services/agent-config.js';
+import { sendVerification } from './account.js';
+import { createDefaultRules } from '../services/alerting.js';
 import {
   csrfGuard,
   startSession,
@@ -109,8 +111,10 @@ export function authRoutes(store, limits) {
         address: user.email,
         enabled: true,
       });
+      await createDefaultRules(tx, org.id, project.id);
       return user;
     });
+    await sendVerification(store, user);
     await startSession(store, req, res, user);
     res.status(201).json({ user: publicUser(user) });
   });

@@ -8,15 +8,49 @@ datasource db {
 }
 
 model User {
-  id           String               @id @default(uuid())
-  name         String
-  email        String               @unique
-  passwordHash String
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
-  memberships  OrganizationMember[]
-  auditLogs    AuditLog[]
-  sessions     Session[]
+  id              String               @id @default(uuid())
+  name            String
+  email           String               @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  memberships     OrganizationMember[]
+  auditLogs       AuditLog[]
+  sessions        Session[]
+  accountTokens   AccountToken[]
+}
+
+/// Single-use, hashed tokens for email verification and password reset.
+model AccountToken {
+  id        String    @id @default(uuid())
+  userId    String
+  kind      String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+}
+
+/// A pending or finished invitation to join an organization. Only the token hash is stored.
+model Invite {
+  id           String       @id @default(uuid())
+  orgId        String
+  email        String
+  role         String
+  tokenHash    String       @unique
+  invitedById  String
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, email])
 }
 
 model Organization {
@@ -30,6 +64,7 @@ model Organization {
   projects             Project[]
   subscription         Subscription?
   billingCustomer      BillingCustomer?
+  billingProfile       BillingProfile?
   alertIncidents       AlertIncident[]
   auditLogs            AuditLog[]
   invoices             Invoice[]
@@ -39,6 +74,7 @@ model Organization {
   payments             Payment[]
   uptimeChecks         UptimeCheck[]
   webhookEvents        WebhookEvent[]
+  invites              Invite[]
 }
 
 model OrganizationMember {
@@ -46,6 +82,7 @@ model OrganizationMember {
   orgId        String
   userId       String
   role         String
+  /// Deprecated and unused since the 3-role model (owner/admin/viewer). Kept to avoid a destructive migration.
   projectIds   String[]     @default([])
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -248,17 +285,25 @@ model SubscriptionPlan {
 }
 
 model Subscription {
-  id                String           @id @default(uuid())
-  orgId             String           @unique
-  planId            String
-  status            String
-  interval          String
-  periodEnd         DateTime
-  cancelAtPeriodEnd Boolean          @default(false)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  organization      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  plan              SubscriptionPlan @relation(fields: [planId], references: [id])
+  id                     String           @id @default(uuid())
+  orgId                  String           @unique
+  planId                 String
+  status                 String
+  interval               String
+  periodEnd              DateTime
+  cancelAtPeriodEnd      Boolean          @default(false)
+  /// Payment provider ("stripe" | "razorpay") and its subscription id; null on Free.
+  provider               String?
+  providerSubscriptionId String?          @unique
+  currency               String?
+  /// When the first unpaid invoice failed; the 7-day grace period counts from here.
+  pastDueSince           DateTime?
+  /// Provider timestamp of the newest event applied, so out-of-order webhooks never roll state back.
+  providerEventAt        DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  organization           Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
 }
 
 model BillingCustomer {
@@ -272,33 +317,56 @@ model BillingCustomer {
 }
 
 model Invoice {
-  id           String       @id @default(uuid())
-  orgId        String
-  number       String       @unique
-  amount       Int
-  currency     String
-  status       String
-  provider     String
-  periodStart  DateTime
-  periodEnd    DateTime
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  id            String       @id @default(uuid())
+  orgId         String
+  number        String       @unique
+  amount        Int
+  currency      String
+  status        String
+  provider      String
+  periodStart   DateTime
+  periodEnd     DateTime
+  /// Amount before tax, tax amount and tax rate (GST 0.18 for INR); `amount` is the total charged.
+  subtotal      Int?
+  tax           Int          @default(0)
+  taxRate       Float        @default(0)
+  taxBreakdown  Json?
+  customerGstin String?
+  url           String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
 }
 
-model Payment {
+/// Who we invoice: legal name, address and (for India) the optional GSTIN.
+model BillingProfile {
   id           String       @id @default(uuid())
-  orgId        String
-  providerId   String       @unique
-  provider     String
-  amount       Int
-  currency     String
-  status       String
+  orgId        String       @unique
+  legalName    String       @default("")
+  email        String       @default("")
+  country      String       @default("")
+  state        String       @default("")
+  gstin        String       @default("")
+  address      String       @default("")
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id             String       @id @default(uuid())
+  orgId          String
+  providerId     String       @unique
+  provider       String
+  amount         Int
+  refundedAmount Int          @default(0)
+  currency       String
+  status         String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
 }
@@ -316,6 +384,13 @@ model AlertRule {
   enabled         Boolean         @default(true)
   severity        String
   silenceUntil    DateTime?
+  /// Plain-language rule fields (templates, scope, routing). "all" or "selected".
+  scopeType       String          @default("all")
+  scopeIds        String[]        @default([])
+  /// Empty means "all enabled contacts".
+  contactIds      String[]        @default([])
+  templateKey     String?
+  deletedAt       DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   project         Project         @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
@@ -337,6 +412,11 @@ model AlertIncident {
   startedAt      DateTime
   resolvedAt     DateTime?
   lastNotifiedAt DateTime?
+  acknowledgedAt DateTime?
+  /// When the condition first looked clear again; the incident resolves after it stays clear (flap protection).
+  clearSince     DateTime?
+  /// True once a "firing" notification was queued, so recovery is only announced for alerts users saw.
+  notified       Boolean                @default(false)
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   rule           AlertRule              @relation(fields: [ruleId], references: [id], onDelete: Cascade)
@@ -345,19 +425,30 @@ model AlertIncident {
   organization   Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, projectId, state])
+  @@index([ruleId, resourceId, state])
 }
 
 model NotificationChannel {
-  id           String                 @id @default(uuid())
-  orgId        String
-  name         String
-  type         String
-  address      String
-  enabled      Boolean                @default(true)
-  createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
-  deliveries   NotificationDelivery[]
-  organization Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id            String                 @id @default(uuid())
+  orgId         String
+  name          String
+  type          String
+  address       String
+  enabled       Boolean                @default(true)
+  /// Webhook contacts: HMAC signing secret. Never returned after creation.
+  secret        String?
+  /// Display details such as the linked Telegram chat name.
+  meta          Json                   @default("{}")
+  /// Telegram link flow: SHA-256 of the one-time code, valid until linkExpiresAt.
+  linkCodeHash  String?                @unique
+  linkExpiresAt DateTime?
+  lastTestAt    DateTime?
+  lastTestOk    Boolean?
+  lastTestError String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  deliveries    NotificationDelivery[]
+  organization  Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
 }
@@ -375,6 +466,8 @@ model NotificationDelivery {
   nextAttemptAt DateTime
   deliveredAt   DateTime?
   error         String?
+  /// Structured payload for webhook contacts.
+  payload       Json?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   incident      AlertIncident       @relation(fields: [incidentId], references: [id], onDelete: Cascade)
@@ -399,14 +492,17 @@ model AuditLog {
 }
 
 model WebhookEvent {
-  id           String       @id
-  orgId        String
+  id           String        @id
+  orgId        String?
+  provider     String        @default("mock")
+  eventId      String?
   type         String
   payload      Json
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Restrict)
 
+  @@unique([provider, eventId])
   @@index([orgId, createdAt])
 }
 
@@ -425,6 +521,23 @@ model UptimeMonitor {
   lastCheckedAt        DateTime?
   nextCheckAt          DateTime?
   certificateExpiresAt DateTime?
+  /// http | keyword | api | tcp
+  type                 String        @default("http")
+  method               String        @default("GET")
+  headers              Json          @default("{}")
+  body                 String?
+  expectedStatus       Int?
+  keyword              String?
+  keywordMode          String        @default("present")
+  jsonContains         String?
+  timeoutSeconds       Int           @default(10)
+  lastError            String?
+  downSince            DateTime?
+  domain               String?
+  domainExpiresAt      DateTime?
+  domainCheckedAt      DateTime?
+  /// ok | unsupported | error
+  domainStatus         String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   project              Project       @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
@@ -472,4 +585,95 @@ model WorkerLease {
   expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Phase 11: current state of one Docker container on one server (identified by its name).
+model ContainerItem {
+  id              String    @id @default(uuid())
+  orgId           String
+  agentId         String
+  dockerId        String    @default("")
+  name            String
+  image           String    @default("")
+  /// running | restarting | paused | stopped | removed
+  state           String
+  rawState        String    @default("")
+  status          String    @default("")
+  restartCount    Int       @default(0)
+  cpuPercent      Float?
+  memoryBytes     Float?
+  memoryLimitBytes Float?
+  startedAt       DateTime?
+  /// True once the container has been seen running; a "stopped" alert needs it.
+  wasRunning      Boolean   @default(false)
+  /// Consecutive snapshots in which the container was present and not running.
+  stoppedStreak   Int       @default(0)
+  firstSeen       DateTime  @default(now())
+  lastSeen        DateTime  @default(now())
+  /// The agent's snapshot time that last updated this row (makes retries harmless).
+  reportedAt      DateTime  @default(now())
+  stateChangedAt  DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([agentId, name])
+  @@index([orgId, state])
+}
+
+/// Phase 12: current state of one monitored service (systemd unit, process, port, nginx...) on one server.
+model ServiceItem {
+  id             String   @id @default(uuid())
+  orgId          String
+  agentId        String
+  name           String
+  /// systemd | process | port | nginx | apache | mysql | postgres | redis
+  kind           String
+  /// running | stopped | failed | unknown
+  state          String
+  detail         String   @default("")
+  responseMs     Float?
+  port           Int?
+  stoppedStreak  Int      @default(0)
+  firstSeen      DateTime @default(now())
+  lastSeen       DateTime @default(now())
+  reportedAt     DateTime @default(now())
+  stateChangedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([agentId, kind, name])
+  @@index([orgId, state])
+}
+
+/// State-change history for containers and services.
+model StateEvent {
+  id          String   @id @default(uuid())
+  orgId       String
+  agentId     String
+  /// container | service
+  subjectType String
+  subjectId   String
+  subjectName String
+  /// appeared | started | stopped | restarted | oom | removed | failed | recovered
+  type        String
+  message     String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([subjectType, subjectId, createdAt])
+  @@index([agentId, createdAt])
+}
+
+/// A TimescaleDB hypertable (created in the migration): one row per container per ingest.
+model ContainerMetric {
+  time             DateTime @db.Timestamptz(6)
+  containerId      String   @map("container_id")
+  agentId          String   @map("agent_id")
+  orgId            String   @map("org_id")
+  cpuPercent       Float?   @map("cpu_percent")
+  memoryBytes      Float?   @map("memory_bytes")
+  memoryLimitBytes Float?   @map("memory_limit_bytes")
+  restartCount     Int?     @map("restart_count")
+
+  @@id([containerId, time])
+  @@map("container_metrics")
 }

@@ -63,7 +63,7 @@ export async function entitlements(store, orgId) {
   );
   if (subscription.status === 'past_due')
     assert(
-      Date.now() - new Date(subscription.updatedAt).getTime() < 7 * 86400000,
+      Date.now() - new Date(subscription.pastDueSince || subscription.updatedAt).getTime() < 7 * 86400000,
       402,
       'The payment grace period has ended.',
     );

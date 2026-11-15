@@ -7,7 +7,12 @@ const IDLE_MS = 7 * 86400000; // sign out after 7 idle days
 const ABSOLUTE_MS = 30 * 86400000; // and never keep a session longer than 30 days
 const TOUCH_EVERY_MS = 60000;
 
-export const publicUser = ({ id, name, email }) => ({ id, name, email });
+export const publicUser = ({ id, name, email, emailVerifiedAt }) => ({
+  id,
+  name,
+  email,
+  emailVerified: Boolean(emailVerifiedAt),
+});
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -124,22 +129,14 @@ export function permit(...roles) {
     }
   };
 }
-export const canEdit = permit('owner', 'admin', 'editor');
+// Three roles: owner (everything), admin (everything except billing and ownership), viewer (read-only).
+export const canEdit = permit('owner', 'admin');
 export const canAdmin = permit('owner', 'admin');
-export function requireMemberGrant(context, role, projectIds = []) {
-  if (context.membership.role === 'owner') return;
-  assert(!['owner', 'admin'].includes(role), 403, 'Only the owner can manage administrators.');
-  const allowed = context.membership.projectIds || [];
-  assert(
-    !allowed.length || (projectIds.length > 0 && projectIds.every((id) => allowed.includes(id))),
-    403,
-    'A restricted administrator cannot grant access beyond their assigned projects.',
-  );
-}
+export const canOwner = permit('owner');
+// Per-project scoping was removed: every member of an organization sees all of its projects.
 export async function visibleProjects(store, context) {
   const rows = await store.list('project', { orgId: context.orgId });
-  const assigned = context.membership.projectIds || [];
-  return rows.filter((p) => !p.deletedAt && (!assigned.length || assigned.includes(p.id)));
+  return rows.filter((p) => !p.deletedAt);
 }
 export async function requireProject(store, context, projectId) {
   assert(

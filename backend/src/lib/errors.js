@@ -20,5 +20,6 @@ export function errorHandler(error, req, res, next) {
       status >= 500 && !(error instanceof HttpError)
         ? 'The service could not complete this request.'
         : error.message,
+    ...(status < 500 && error.reason ? { reason: error.reason } : {}),
   });
 }

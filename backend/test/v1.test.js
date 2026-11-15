@@ -109,7 +109,7 @@ test('only administrators of the organization manage the key, and keys never cro
   const a = await register(app, 'Alpha');
   const b = await register(app, 'Beta');
   const viewer = await addMember(app, store, a, { role: 'viewer' });
-  const restricted = await addMember(app, store, a, { role: 'admin', projectIds: [a.project.id] });
+  const restricted = await addMember(app, store, a, { role: 'viewer' });
   assert.equal((await viewer.client.post('/api/api-key')).status, 403);
   assert.equal((await restricted.client.post('/api/api-key')).status, 403);
   const keyA = await createKey(a);
@@ -388,7 +388,7 @@ test('setup profiles are created per organization, pulled by the agent, and vali
   assert.equal(pulled.body.version, 1);
 
   const update = await owner.client.put(`/api/agent-configs/${standard.id}`).send({
-    settings: { sendIntervalSeconds: 60, collectors: { processes: false, docker: true } },
+    settings: { sendIntervalSeconds: 60, collectors: { processes: false, shell: true } },
   });
   assert.equal(
     update.status,
