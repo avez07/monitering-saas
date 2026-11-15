@@ -54,6 +54,8 @@ export const routes = [
     ],
   },
   // Token links work whether or not you are signed in.
+  { path: '/reset-password', element: <Auth /> },
+  { path: '/verify-email', element: <Auth /> },
   { path: '/reset-password/:token', element: <Auth /> },
   { path: '/verify-email/:token', element: <Auth /> },
   { path: '/invite/:token', element: <Auth /> },

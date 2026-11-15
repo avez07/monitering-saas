@@ -73,7 +73,7 @@ export function Topbar() {
       <ThemeToggle />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="rounded-full" aria-label="Account menu">
+          <Button variant="ghost" size="icon" className="rounded-full" aria-label={`${initials(user?.name)} account menu`}>
             <Avatar className="size-8">
               <AvatarFallback className="text-xs">{initials(user?.name)}</AvatarFallback>
             </Avatar>

@@ -69,11 +69,15 @@ export function TimeSeriesChart({
             dataKey={xKey}
             {...axisProps}
             minTickGap={48}
-            tickFormatter={(v) =>
-              new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }
+            tickFormatter={(v) => {
+              const d = new Date(v);
+              const span = data.length > 1 ? new Date(data[data.length - 1][xKey]) - new Date(data[0][xKey]) : 0;
+              return span > 36 * 3600 * 1000
+                ? d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }}
           />
-          <YAxis {...axisProps} width={44} domain={domain} tickFormatter={format} />
+          <YAxis {...axisProps} width={56} domain={domain} tickFormatter={(v) => format(v)} />
           <Tooltip content={<ChartTooltip series={series} format={format} />} />
           {series.map((s, i) =>
             type === 'line' ? (

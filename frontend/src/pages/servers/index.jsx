@@ -1,11 +1,13 @@
-import { ComingSoon } from '@/components/app';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import ServerList from './ServerList';
+import ServerDetail from './ServerDetail';
 
-// STUB: the page owner replaces this whole folder.
 export default function Servers() {
   return (
-    <ComingSoon
-      title="Servers"
-      description="Every server you monitor (list at /servers, detail at /servers/:id)."
-    />
+    <Routes>
+      <Route index element={<ServerList />} />
+      <Route path=":id/*" element={<ServerDetail />} />
+      <Route path="*" element={<Navigate to="/servers" replace />} />
+    </Routes>
   );
 }

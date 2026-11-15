@@ -1,8 +1,13 @@
-import { ComingSoon } from '@/components/app';
+import { Route, Routes } from 'react-router-dom';
+import WebsiteList from './WebsiteList';
+import WebsiteDetail from './WebsiteDetail';
 
-// STUB: the page owner replaces this whole folder.
 export default function Websites() {
   return (
-    <ComingSoon title="Websites & APIs" description="Uptime checks from outside your servers." />
+    <Routes>
+      <Route index element={<WebsiteList />} />
+      <Route path=":id" element={<WebsiteDetail />} />
+      <Route path="*" element={<WebsiteList />} />
+    </Routes>
   );
 }

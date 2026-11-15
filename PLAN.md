@@ -214,16 +214,14 @@ A server has a **Connection** tab, and new servers show it automatically until t
 - **Remove member:** keeps the existing `DELETE /members/:id` rules (the owner can't be removed, and you can't remove yourself). Removing a member revokes their sessions in that organization on their next request.
 - **Plan member limits** are enforced on invite.
 
-### 3.7 UI redesign (request 1)
+### 3.7 New frontend (replaces the old UI entirely)
 
-- **Direction:** light theme by default with dark mode, plus:
-  - Neutral greys, one calm accent colour, and status colours that always come with a word (Healthy / Needs attention / Down), so they're colour-blind safe.
-  - The Inter font.
-  - Large readable numbers ("Disk 72% used · 28 GB free") instead of raw metric names.
-  - Generous spacing.
-  - Every empty state has one clear next action.
-- **Stack:** keep React, Vite, Tailwind, React Query and Recharts. Replace `frontend/src/components/ui.jsx` with a new component set built on **Radix UI primitives** (accessible dialogs, menus, tabs and tooltips) in the shadcn style (code lives in our repo).
-- **Approval first:** before any UI code, I publish **clickable mockups** for you to review: Overview, Servers list, Server detail with its Connection tab, the Add-server wizard, and Alert templates. This avoids building a second design you don't like.
+- **Stack (fixed):** React + **JSX** (no TypeScript), Vite, **Tailwind CSS v3** (latest 3.4.x, with `tailwind.config.js`, `postcss.config.js` and `tailwindcss-animate`) and **shadcn/ui** added with the v3-compatible CLI (`npx shadcn@2.3.0 init|add`, `components.json` has `"tsx": false`). React Query, React Router and Recharts stay.
+  - The brief said "v4" but every concrete instruction is v3 (`tailwind.config.js`, `shadcn@2.3.0`, "no `@theme` blocks, no `tw-animate-css`"), so v3 is used. No `@import "tailwindcss"` anywhere.
+- **Theme:** all colours, radius, fonts and shadows are CSS variables in one file (`frontend/src/index.css`: `:root` and `.dark`), mapped in `tailwind.config.js`. Components use only the variables. The tweakcn export (`@theme.css`) was not found in the workspace, so the stock shadcn neutral variables are a placeholder; pasting the export over those two blocks restyles everything.
+- **Light and dark** with a toggle (`.dark` class, remembered, defaults to the system setting).
+- **Look:** modern, clean, professional SaaS; responsive down to 375 px; plain language; status always uses a word as well as a colour; every empty state has one next action.
+- The old frontend (`frontend/src/**`, `ui.jsx`, the 3000-line stylesheet) is deleted once the new one replaces it.
 
 ---
 
@@ -265,9 +263,9 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 
 ## 6. Phases (small, each one testable on its own)
 
-**Phase 0 — Cleanup and security baseline.** Done (in the working tree; commit as the baseline).
+**Phase 0 — Cleanup and security baseline.** ✅ Done.
 
-**Phase 1 — Account API key, registration and metric storage** (backend only) — **Done.** Beyond this list: `/api/agent-configs` (create, list, update) lets the wizard save setup profiles later; `DELETE /api/resources/:id` on a server also disconnects its agent; the dashboard's "Connect a server" dialog was adapted to the API key as an interim step until the Phase 5 wizard.
+**Phase 1 — Account API key, registration and metric storage** (backend only) — ✅ **Done.** Beyond this list: `/api/agent-configs` (create, list, update) lets the wizard save setup profiles later; `DELETE /api/resources/:id` on a server also disconnects its agent; the dashboard's "Connect a server" dialog was adapted to the API key as an interim step until the Phase 5 wizard.
 
 - Add the `ApiKey`, `AgentConfig` and `AgentEvent` models, the Timescale extension, a `server_metrics` hypertable, 5-minute and 1-hour continuous aggregates, and per-plan retention. Drop `AgentEnrollmentToken`.
 - Endpoints:
@@ -299,11 +297,10 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 - _Done when:_ fresh Ubuntu 22.04/24.04, Debian 12 and Rocky 9 (amd64, plus one arm64) go from install to first data in under 2 minutes; a tampered tarball is refused; re-install doesn't duplicate; uninstall leaves nothing behind.
 - _Needs from you:_ a Cloudflare account with R2 and the `get.` and `downloads.` DNS records. Until then, local `/downloads` works.
 
-**Phase 4 — New design and app shell**
+**Phase 4 — New frontend foundation** (replaces the old "new design" phase; no mockup round, the stack and theme are fixed in 3.7)
 
-- 4a: clickable mockups for your approval (no product code).
-- 4b: design tokens, light and dark themes, the new component set (Radix), the new sidebar from section 2, top bar with the **Add server** button, Overview rebuilt, project and environment pickers hidden, Agents page removed. Existing pages are moved onto the new components.
-- _Done when:_ you approve the mockups; every page uses the new components; it works at 375 px; it passes an axe accessibility check; Playwright navigation tests pass.
+- Fresh `frontend/`: Vite + React JSX, Tailwind v3, shadcn (v3 CLI), theme variables, dark-mode toggle, API/session/query libs, app shell (sidebar from section 2, top bar with **Add server**, mobile drawer), shared components, and a route table with a page stub for every section. Project and environment pickers hidden; Agents page gone.
+- _Done when:_ `npm run build` passes; sign-in/register work against the existing API; light/dark toggle works; usable at 375 px; no Tailwind v4 syntax anywhere; old UI deleted.
 
 **Phase 5 — "Add server" wizard** (one flow replaces all connect buttons)
 
@@ -385,7 +382,24 @@ Changed: per-server enrollment tokens become the account API key (3.1); the agen
 
 ## 8. Recommended order to start
 
-**Phase 1 first**, with the **Phase 4a mockups produced in parallel**. The mockups aren't product code, so you can review the design while the backend is built.
+Superseded by section 9 (agents and waves). Phases 0 and 1 are done.
 
-- **Why Phase 1:** the wizard, the troubleshooting page, the charts and the one-key setup all depend on the key → register → ingest → storage path. It's also the root cause of "customers can't install".
-- **Why the mockups now:** you said the UI is the biggest disappointment. Getting design approval early means Phases 4b–7 are built once, in a design you've already agreed to.
+## 9. Build plan: agents, ownership and order
+
+Each agent edits only the files it owns. Frontend agents: **Tailwind v3 only, JSX only, shadcn from the v3 CLI only, colours only from the theme variables.** Backend agents publish their API contract to `docs/api/<area>.md` first so the frontend can build against it. Each uses its own test database (`TEST_DATABASE_URL`).
+
+| Wave | Agent | Phases / tasks | Owns | Waits for |
+| ---- | ----- | -------------- | ---- | --------- |
+| 1 | **F: Frontend foundation** | 4 | `frontend/` except the page folders below | — |
+| 1 | **B1: Backend core** | 6, 7 (API), 9, account emails (13), `/api/agent/releases` | routes `servers`, `team`, `account`, `connection`; services `agent-errors`, `invites`, `mail`; members part of `control.js` | — |
+| 1 | **B2: Backend alerts + websites** | 8, 10 | routes `alerts`, `contacts`, `websites`; services `alerting`, `contacts`, `checks`; alerts/uptime/notifications part of `control.js`; `worker.js` | — |
+| 1 | **G1: Go agent + installer** | 2, 3 | `agent/`, `.github/workflows/agent*.yml`, `backend/src/routes/downloads.js` | — |
+| 1 | **Ops: production files** | 14 (files only; real deployment needs your accounts) | `deploy/`, `Dockerfile`, `docker-compose.prod.yml` | — |
+| 2 | **FE-A: Servers pages** | 6, 7, 11, 12 (UI) | `frontend/src/pages/{overview,servers,containers,services}/` | F, B1 contract |
+| 2 | **FE-B: Wizard, auth, settings** | 5, 9 (UI), 13 (auth UI), 15 (UI) | `frontend/src/pages/{auth,settings,add-server}/` | F, B1 contract, G1 releases |
+| 2 | **FE-C: Alerts + websites UI** | 8, 10 (UI) | `frontend/src/pages/{alerts,websites}/` | F, B2 contract |
+| 2 | **M: Marketing site + docs** | 13 | `site/` | F (theme file) |
+| 3 | **B3: Backend containers/services** | 11, 12 (API, rules) | routes and services for containers/services | B1, B2 |
+| 3 | **G2: Agent collectors** | 11, 12 (Go) | `agent/internal/{docker,services}/` | G1 |
+| 3 | **B4: Billing** | 15 (Razorpay/Stripe code, signed idempotent webhooks; live keys need you) | `routes/billing.js`, `services/billing*` | B1 |
+| 4 | **QA** | end-to-end, accessibility, full customer journey, bug fixes | `e2e/`, tests | all |
