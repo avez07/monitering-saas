@@ -1,0 +1,199 @@
+# Release pipeline for the agent. Push a tag like agent/v0.4.1.
+#
+#   test -> build -> upload (R2 + GitHub release) -> smoke-test install.sh on a fresh Ubuntu
+#   runner -> only then: docker image + latest.json (so a broken build never becomes "latest").
+#
+# GitHub secrets used (names only; the values live in the repository settings):
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET   Cloudflare R2 (S3 compatible)
+#   SMOKE_API_URL, SMOKE_API_KEY                                          a dedicated smoke-test organization
+name: agent-release
+
+on:
+  push:
+    tags: ['agent/v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-release
+  cancel-in-progress: false
+
+env:
+  DOWNLOADS_BASE_URL: https://downloads.yuktiops.com/agent
+  R2_PREFIX: agent
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#agent/v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "Bad tag: $GITHUB_REF_NAME"; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - run: go vet ./...
+        working-directory: agent
+      - run: go test -race -count=1 ./...
+        working-directory: agent
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x -s bash agent/scripts/install.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signature
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: sigstore/cosign-installer@v3
+      - name: Build tar.gz, deb, rpm, checksums and signature
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean --skip=docker,publish,validate
+        env:
+          GORELEASER_CURRENT_TAG: v${{ env.VERSION }}
+      - name: Collect release files and re-check them
+        run: |
+          mkdir -p release
+          cp agent/dist/*.tar.gz agent/dist/*.deb agent/dist/*.rpm agent/dist/checksums.txt agent/dist/checksums.txt.sig agent/dist/checksums.txt.pem release/
+          cp agent/scripts/install.sh release/install.sh
+          cd release && sha256sum -c checksums.txt && ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-release
+          path: release/
+          if-no-files-found: error
+
+  upload:
+    needs: [test, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # GitHub release mirror
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-release
+          path: release
+      - name: Upload the versioned files to Cloudflare R2 (immutable)
+        run: |
+          aws s3 cp release "s3://${{ secrets.R2_BUCKET }}/${R2_PREFIX}/v${VERSION}/" --recursive \
+            --endpoint-url "$R2_ENDPOINT" --cache-control 'public, max-age=31536000, immutable'
+      - name: Mirror to a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""; [[ "$VERSION" == *-* ]] && prerelease="--prerelease"
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "Agent v${VERSION}" \
+            --notes "YuktiOps agent ${VERSION}. Verify downloads with checksums.txt." $prerelease
+
+  smoke:
+    # A fresh Ubuntu runner has systemd. This installs the exact version that was just uploaded (not
+    # "latest"), registers it with a smoke-test organization and waits for real data.
+    needs: [test, upload]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from R2 and wait for the first data
+        env:
+          SMOKE_API_URL: ${{ secrets.SMOKE_API_URL }}
+          SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+        run: |
+          curl -fsSL "${DOWNLOADS_BASE_URL}/v${VERSION}/install.sh" -o /tmp/install.sh
+          cmp /tmp/install.sh agent/scripts/install.sh
+          sudo -E bash /tmp/install.sh --base-url="$DOWNLOADS_BASE_URL" --version="$VERSION" \
+            --api="$SMOKE_API_URL" --key="$SMOKE_API_KEY" --name="smoke-${GITHUB_RUN_ID}"
+          yuktiops-agent status
+          systemctl is-enabled yuktiops-agent
+          sudo systemctl restart yuktiops-agent && sleep 5 && systemctl is-active yuktiops-agent
+      - name: Uninstall leaves nothing behind
+        run: |
+          sudo bash /tmp/install.sh --uninstall
+          for path in /usr/local/bin/yuktiops-agent /etc/yuktiops /var/lib/yuktiops /etc/systemd/system/yuktiops-agent.service; do
+            test ! -e "$path" || { echo "left behind: $path"; exit 1; }
+          done
+          ! id yuktiops
+
+  publish-latest:
+    # Only after the smoke test passed: the docker image and latest.json move to this version.
+    needs: [test, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the multi-arch Docker image (ghcr.io/yuktiops/agent)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean --skip=sign,validate
+        env:
+          GORELEASER_CURRENT_TAG: v${{ env.VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-release
+          path: release
+      - name: Write latest.json and move "latest"
+        run: |
+          node -e '
+            const fs = require("fs");
+            const files = {};
+            for (const line of fs.readFileSync("release/checksums.txt", "utf8").trim().split("\n")) {
+              const [hash, name] = line.trim().split(/\s+/);
+              files[name] = hash;
+            }
+            const doc = { version: process.env.VERSION, released: new Date().toISOString(), files };
+            fs.writeFileSync("latest.json", JSON.stringify(doc, null, 2) + "\n");
+          '
+          aws s3 cp release/install.sh "s3://${{ secrets.R2_BUCKET }}/${R2_PREFIX}/install.sh" \
+            --endpoint-url "$R2_ENDPOINT" --cache-control 'no-cache' --content-type 'text/x-shellscript; charset=utf-8'
+          aws s3 cp latest.json "s3://${{ secrets.R2_BUCKET }}/${R2_PREFIX}/latest.json" \
+            --endpoint-url "$R2_ENDPOINT" --cache-control 'no-cache' --content-type 'application/json'

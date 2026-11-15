@@ -1,0 +1,38 @@
+[Unit]
+Description=YuktiOps monitoring agent
+Documentation=https://yuktiops.com/docs/agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yuktiops
+Group=yuktiops
+ExecStart=/usr/local/bin/yuktiops-agent run
+# Optional proxy settings (HTTPS_PROXY=...); the file does not have to exist.
+EnvironmentFile=-/etc/yuktiops/environment
+
+# Start on boot and come back after any crash.
+Restart=always
+RestartSec=5
+
+# /var/lib/yuktiops is created and owned by the service user (offline buffer and status).
+StateDirectory=yuktiops
+
+# The agent only reads system statistics and makes outbound HTTPS requests.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Hard caps. The agent normally stays far below them (target: under 25 MB and 1% of one CPU).
+MemoryMax=64M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

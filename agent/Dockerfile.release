@@ -1,0 +1,14 @@
+# Image built by GoReleaser: the binary is copied from the build context. Multi-arch (amd64, arm64, armv7).
+FROM busybox:1.37 AS prepare
+RUN mkdir -p /out/var/lib/yuktiops && chown -R 65532:65532 /out/var/lib/yuktiops
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY yuktiops-agent /usr/local/bin/yuktiops-agent
+COPY --from=prepare --chown=65532:65532 /out/var/lib/yuktiops /var/lib/yuktiops
+# Settings and the offline buffer live in one volume so a recreated container is the same server.
+ENV YUKTIOPS_CONFIG_DIR=/var/lib/yuktiops/config \
+    YUKTIOPS_STATE_DIR=/var/lib/yuktiops/state
+VOLUME ["/var/lib/yuktiops"]
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/yuktiops-agent"]
+CMD ["run"]

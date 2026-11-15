@@ -1,0 +1,61 @@
+name: agent-ci
+
+on:
+  pull_request:
+    paths:
+      - 'agent/**'
+      - '.goreleaser.yaml'
+      - '.github/workflows/agent-*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'agent/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: gofmt
+        working-directory: agent
+        run: test -z "$(gofmt -l .)" || { gofmt -d .; exit 1; }
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+      - name: go test (race detector)
+        working-directory: agent
+        run: go test -race -count=1 ./...
+      - name: Cross-compile every target
+        working-directory: agent
+        run: |
+          for target in linux/amd64 linux/arm64 linux/arm/7; do
+            IFS=/ read -r os arch arm <<<"$target"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=${arm:-} go build -trimpath -ldflags "-s -w" -o /dev/null ./cmd/yuktiops-agent
+            echo "built $target"
+          done
+
+  scripts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck install.sh and package scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x -s bash agent/scripts/install.sh
+          shellcheck -s sh agent/packaging/*.sh
+      - name: GoReleaser config is valid
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: check

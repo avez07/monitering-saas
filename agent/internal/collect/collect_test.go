@@ -306,8 +306,8 @@ func TestCollectorSampleAndRates(t *testing.T) {
 	check("memory", s.Memory, 25)
 	check("swap", s.Swap, 25)
 	check("uptime", s.Uptime, 86400)
-	check("netRx", s.NetRx, 15000)       // (100000 + 50000) / 10 s
-	check("netTx", s.NetTx, 2000)        // 20000 / 10 s
+	check("netRx", s.NetRx, 15000)          // (100000 + 50000) / 10 s
+	check("netTx", s.NetTx, 2000)           // 20000 / 10 s
 	check("diskRead", s.DiskRead, 102400)   // 2000 sectors * 512 / 10 s
 	check("diskWrite", s.DiskWrite, 204800) // 4000 sectors * 512 / 10 s
 	check("disk", s.Disk, 63.16)

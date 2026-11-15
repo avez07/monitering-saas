@@ -22,6 +22,7 @@ const (
 	EnvStateDir  = "YUKTIOPS_STATE_DIR"
 	EnvAPIURL    = "YUKTIOPS_API_URL"
 	EnvAPIKey    = "YUKTIOPS_API_KEY"
+	EnvName      = "YUKTIOPS_NAME"
 )
 
 // Paths says where the agent keeps its files. Both directories can be overridden (flag, then

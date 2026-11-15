@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -115,7 +116,7 @@ func TestCredentialAndSecureWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o640 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 { // Windows has no Unix permission bits
 		t.Errorf("mode = %o, want 640", info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
@@ -168,13 +169,13 @@ func TestResolvePaths(t *testing.T) {
 	t.Setenv(EnvConfigDir, "")
 	t.Setenv(EnvStateDir, "")
 	p := ResolvePaths("", "")
-	if !p.IsDefault() || p.CredentialFile() != "/etc/yuktiops/credential" || p.StateFile() != "/var/lib/yuktiops/state.json" {
+	if !p.IsDefault() || p.CredentialFile() != filepath.Join("/etc/yuktiops", "credential") || p.StateFile() != filepath.Join("/var/lib/yuktiops", "state.json") {
 		t.Errorf("defaults wrong: %+v", p)
 	}
 	t.Setenv(EnvConfigDir, "/tmp/env-config")
 	t.Setenv(EnvStateDir, "/tmp/env-state")
 	p = ResolvePaths("", "/tmp/flag-state")
-	if p.ConfigDir != "/tmp/env-config" || p.StateDir != "/tmp/flag-state" {
+	if p.ConfigDir != filepath.Clean("/tmp/env-config") || p.StateDir != filepath.Clean("/tmp/flag-state") {
 		t.Errorf("precedence wrong: %+v", p)
 	}
 }

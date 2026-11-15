@@ -97,15 +97,15 @@ func (k Kind) Code() string {
 	case KindDNS:
 		return "dns_failed"
 	case KindBlocked:
-		return "https_blocked"
+		return "https_unreachable"
 	case KindProxy:
-		return "proxy_failed"
+		return "proxy_error"
 	case KindTLS:
 		return "tls_failed"
 	case KindClock:
 		return "clock_skew"
 	case KindUnauthorized:
-		return "credential_rejected"
+		return "credential_revoked"
 	case KindRejected:
 		return "payload_rejected"
 	case KindThrottled:

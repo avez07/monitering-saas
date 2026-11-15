@@ -17,8 +17,8 @@ const clockTicksPerSecond = 100
 
 // fsUsage is what statfs reports for one filesystem.
 type fsUsage struct {
-	BlockSize               uint64
-	Blocks, Bfree, Bavail   uint64
+	BlockSize             uint64
+	Blocks, Bfree, Bavail uint64
 }
 
 // Collector reads the system's counters and turns them into rates and percentages. It keeps the

@@ -1,0 +1,136 @@
+# GoReleaser configuration for the YuktiOps agent (Go module in ./agent).
+# Run by .github/workflows/agent-release.yml on tags like agent/v0.4.1. The workflow sets
+# GORELEASER_CURRENT_TAG=v0.4.1, because GoReleaser OSS does not understand the "agent/" prefix.
+# Uploading to Cloudflare R2 and the GitHub release mirror are done by the workflow, not here.
+version: 2
+project_name: yuktiops-agent
+dist: agent/dist
+
+release:
+  disable: true
+
+builds:
+  - id: agent
+    dir: agent
+    main: ./cmd/yuktiops-agent
+    binary: yuktiops-agent
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: tarball
+    ids: [agent]
+    formats: [tar.gz]
+    name_template: >-
+      yuktiops-agent_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "arm" }}armv7{{ else }}{{ .Arch }}{{ end }}
+    wrap_in_directory: false
+    files:
+      - src: agent/packaging/yuktiops-agent.service
+        dst: yuktiops-agent.service
+      - src: agent/README.md
+        dst: README.md
+
+nfpms:
+  - id: deb
+    package_name: yuktiops-agent
+    ids: [agent]
+    formats: [deb]
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    vendor: YuktiOps
+    homepage: https://yuktiops.com
+    maintainer: YuktiOps <support@yuktiops.com>
+    description: Lightweight server monitoring agent for YuktiOps (reads system statistics, opens no ports).
+    license: Proprietary
+    section: admin
+    bindir: /usr/local/bin
+    contents:
+      - src: agent/packaging/yuktiops-agent.service
+        dst: /etc/systemd/system/yuktiops-agent.service
+    scripts:
+      postinstall: agent/packaging/postinstall.sh
+      preremove: agent/packaging/preremove.sh
+      postremove: agent/packaging/postremove.sh
+  - id: rpm
+    package_name: yuktiops-agent
+    ids: [agent]
+    formats: [rpm]
+    file_name_template: >-
+      {{ .PackageName }}-{{ .Version }}.{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "arm64" }}aarch64{{ else }}armv7hl{{ end }}
+    vendor: YuktiOps
+    homepage: https://yuktiops.com
+    maintainer: YuktiOps <support@yuktiops.com>
+    description: Lightweight server monitoring agent for YuktiOps (reads system statistics, opens no ports).
+    license: Proprietary
+    bindir: /usr/local/bin
+    contents:
+      - src: agent/packaging/yuktiops-agent.service
+        dst: /etc/systemd/system/yuktiops-agent.service
+    scripts:
+      postinstall: agent/packaging/postinstall.sh
+      preremove: agent/packaging/preremove.sh
+      postremove: agent/packaging/postremove.sh
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Keyless cosign signature of checksums.txt (GitHub OIDC identity of the release workflow).
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+
+# Multi-arch container image. The workflow runs this only after the install smoke test passed.
+dockers:
+  - id: image-amd64
+    ids: [agent]
+    goos: linux
+    goarch: amd64
+    dockerfile: agent/Dockerfile.release
+    use: buildx
+    image_templates: ["ghcr.io/yuktiops/agent:{{ .Version }}-amd64"]
+    build_flag_templates: ["--platform=linux/amd64"]
+  - id: image-arm64
+    ids: [agent]
+    goos: linux
+    goarch: arm64
+    dockerfile: agent/Dockerfile.release
+    use: buildx
+    image_templates: ["ghcr.io/yuktiops/agent:{{ .Version }}-arm64"]
+    build_flag_templates: ["--platform=linux/arm64"]
+  - id: image-armv7
+    ids: [agent]
+    goos: linux
+    goarch: arm
+    goarm: "7"
+    dockerfile: agent/Dockerfile.release
+    use: buildx
+    image_templates: ["ghcr.io/yuktiops/agent:{{ .Version }}-armv7"]
+    build_flag_templates: ["--platform=linux/arm/v7"]
+
+docker_manifests:
+  - name_template: "ghcr.io/yuktiops/agent:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-amd64"
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-arm64"
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-armv7"
+  - name_template: "ghcr.io/yuktiops/agent:latest"
+    image_templates:
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-amd64"
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-arm64"
+      - "ghcr.io/yuktiops/agent:{{ .Version }}-armv7"
