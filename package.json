@@ -18,10 +18,14 @@
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "agent": "node backend/scripts/agent.mjs",
+    "agent:build": "node agent/scripts/dist.mjs --host",
+    "agent:dist": "node agent/scripts/dist.mjs",
+    "agent:test": "node agent/scripts/dist.mjs --test",
     "check": "npm test && npm run build && npm run db:validate -w backend",
     "worker": "npm run worker -w backend"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.56.0",
     "concurrently": "^9.2.1",
     "deepmerge-ts": "^8.0.2",
