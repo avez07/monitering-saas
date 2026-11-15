@@ -24,6 +24,14 @@ sudo systemctl enable --now yuktiops-agent
 
 Docker: `docker run -d --name yuktiops-agent --restart unless-stopped -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent` (the image registers itself on first start; the key is not stored). It reports the container's own view of the system.
 
+
+## Containers and services (opt-in, read-only)
+
+Switched on from the setup profile in the dashboard (`collectors.docker`, `collectors.services`); nothing is collected until then. Both run in their own goroutine on the send interval, so a slow Docker daemon or a hanging port never delays sampling or sending.
+
+- **Docker** (`collectors.docker`): GET-only calls over `/var/run/docker.sock` (container list, inspect, one-shot stats; no SDK, other HTTP methods are refused in code). Reports state, restart count, CPU % (from counter deltas between two collections, so the first value appears one interval after start), memory without page cache, memory limit and OOM flag. At most 100 containers, 4 requests at a time, 20 s overall timeout. If the socket is not readable it reports `docker_socket_denied` (once an hour at most) and keeps running. The installer adds the `yuktiops` user to group `docker` only when the profile has Docker turned on (or `--docker` is given), because the socket is root-equivalent.
+- **Services** (`collectors.services`, up to 50): `systemd` (`systemctl show` for validated unit names only, `^[A-Za-z0-9@_.:-]+$`, never starting with `-`; the only program the agent ever runs), `process` (scans `/proc` comm and argv[0]), `port` (TCP connect, 3 s), `nginx` / `apache` (GET of the configured status URL, redirects not followed), and `redis` (`PING`), `mysql` (server greeting), `postgres` (SSLRequest) liveness probes without credentials. Every configured service is reported on every send.
+- A settings document with a malformed service entry (unknown kind, bad name/host/URL/port, duplicates) is rejected as a whole and reported as `config_invalid`; the previous settings stay in force.
 ## Commands
 
 | Command | What it does |
@@ -84,7 +92,7 @@ Environment variables (for development and containers): `YUKTIOPS_CONFIG_DIR`, `
 
 - **Outbound only.** The agent opens no listening port. It talks to one host, over HTTPS; redirects are never followed, so the credential cannot leak to another host. Plain HTTP is refused except for `localhost`.
 - **Never executes remote commands.** The only thing YuktiOps can change remotely is which built-in, read-only collectors run and how often. Settings are validated and clamped; invalid ones are ignored.
-- **Least privilege.** It runs as the system user `yuktiops` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp`, a restricted set of socket families, and hard memory and CPU caps. Docker access is opt-in (`--docker`) because the Docker socket is root-equivalent.
+- **Least privilege.** It runs as the system user `yuktiops` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp`, a restricted set of socket families, and hard memory and CPU caps. Docker access is opt-in (profile setting or `--docker`) because the Docker socket is root-equivalent.
 - **Secrets.** The account API key is used once to register and is never written to disk. The server's own credential is stored `0640 root:yuktiops`, can be revoked from the dashboard, and only identifies this one server. Installers verify the SHA-256 of the download and abort on a mismatch.
 - **Reliability.** Samples that cannot be sent are kept for up to 15 minutes (in memory, and on disk during an outage) and back-filled in order. Retries use exponential backoff with jitter.
 - **Clock.** If the server's clock is wrong the backend corrects the timestamps; `doctor` tells you how to fix the clock.

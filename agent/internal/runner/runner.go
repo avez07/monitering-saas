@@ -70,6 +70,10 @@ type runner struct {
 	host      collect.HostInfo
 	settings  atomic.Pointer[remote.Config]
 	wake      chan struct{}
+	watchWake chan struct{}
+	snap      atomic.Pointer[snapshot]
+	// dockerSocket overrides the default socket path (tests).
+	dockerSocket string
 
 	// Test hooks.
 	now          func() time.Time
@@ -125,6 +129,7 @@ func newRunner(opts Options) (*runner, error) {
 		client:      cl,
 		collector:   collect.New(),
 		wake:        make(chan struct{}, 1),
+		watchWake:   make(chan struct{}, 1),
 		now:         time.Now,
 		seconds:     func(n int) time.Duration { return time.Duration(n) * time.Second },
 		firstSample: time.Second,
@@ -182,7 +187,8 @@ func (r *runner) run(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() { defer wg.Done(); r.watchLoop(ctx) }()
 	go func() { defer wg.Done(); r.sampleLoop(ctx) }()
 	go func() { defer wg.Done(); r.sendLoop(ctx) }()
 	wg.Wait()
@@ -329,6 +335,7 @@ func (r *runner) trySend(ctx context.Context) time.Duration {
 		}
 		lastSeq := chunk[len(chunk)-1].Seq
 		pending := r.errs.Pending()
+		containers, svcs := r.currentSnapshot()
 		samples := make([]json.RawMessage, len(chunk))
 		for i, e := range chunk {
 			samples[i] = e.Data
@@ -344,8 +351,10 @@ func (r *runner) trySend(ctx context.Context) time.Duration {
 				Cores:    r.host.Cores,
 				RAMBytes: r.host.RAMBytes,
 			},
-			Samples: samples,
-			Errors:  pending,
+			Samples:    samples,
+			Errors:     pending,
+			Containers: containers,
+			Services:   svcs,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -511,6 +520,10 @@ func (r *runner) pullConfigIfChanged(ctx context.Context, res *client.IngestResp
 		return
 	}
 	r.settings.Store(&cfg)
+	select {
+	case r.watchWake <- struct{}{}:
+	default:
+	}
 	if err := remote.SaveCache(r.opts.Paths.RemoteConfigFile(), cfg); err != nil && !r.warnedState {
 		r.warnedState = true
 		r.log.Printf("Warning: could not cache the settings in %s: %v", r.opts.Paths.StateDir, err)

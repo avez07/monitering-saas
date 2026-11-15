@@ -256,6 +256,9 @@ type IngestRequest struct {
 	Agent   AgentInfo         `json:"agent"`
 	Samples []json.RawMessage `json:"samples"`
 	Errors  []ErrorReport     `json:"errors"`
+	// Pre-encoded snapshots from the opt-in Docker and service collectors; absent when off.
+	Containers json.RawMessage `json:"containers,omitempty"`
+	Services   json.RawMessage `json:"services,omitempty"`
 }
 
 // IngestResponse is the backend's answer to a batch.

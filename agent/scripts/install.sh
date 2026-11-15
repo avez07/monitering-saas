@@ -357,6 +357,21 @@ register_server() {
   YUKTIOPS_API_KEY="$KEY" "$BIN" "${args[@]}" || die "Registration failed (see the message above)."
 }
 
+# The Docker socket is root-equivalent, so the agent's user joins group "docker" only when the setup
+# profile (cached by the agent as remote-config.json) turned container monitoring on, or --docker was given.
+grant_docker_if_enabled() {
+  local cache="$STATE_DIR/remote-config.json" waited=0
+  if [ "$WANT_DOCKER" -ne 1 ]; then
+    while [ ! -s "$cache" ] && [ "$waited" -lt 10 ]; do sleep 1; waited=$((waited + 1)); done
+    [ -s "$cache" ] && grep -Eq '"docker" *: *true' "$cache" || return 0
+  fi
+  getent group docker >/dev/null 2>&1 || { warn "Container monitoring is on but this server has no \"docker\" group; Docker is not installed or uses another setup."; return 0; }
+  id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx docker && return 0
+  usermod -aG docker "$SERVICE_USER"
+  say "    Added $SERVICE_USER to group \"docker\" (read-only use of the Docker socket) and restarting the agent."
+  systemctl restart yuktiops-agent
+}
+
 start_and_wait() {
   if [ "$NO_START" -eq 1 ]; then
     say ""
@@ -380,6 +395,7 @@ start_and_wait() {
   while [ "$waited" -lt "$WAIT_SECONDS" ]; do
     if [ "$STATE_DIR/state.json" -nt "$TMP/started" ] && "$BIN" status >/dev/null 2>&1; then
       say ""
+      grant_docker_if_enabled
       say "Connected. This server is sending data to YuktiOps."
       if [ -n "$APP_URL" ]; then say "Open $APP_URL/servers to see it."; fi
       say "Check it any time with: yuktiops-agent status"
