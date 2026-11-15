@@ -1,0 +1,28 @@
+---
+import { PLANS, REGISTER_URL } from '../site.js';
+const rows = [['Servers', 'servers'], ['Website and API checks', 'checks'], ['History kept', 'history'], ['Where alerts go', 'contacts'], ['Team members', 'team']];
+---
+<div class="flex justify-center" role="group" aria-label="Currency">
+  <div class="inline-flex rounded-md border p-1">
+    <button type="button" data-currency-btn="INR" aria-pressed="true" class="rounded px-4 py-1.5 text-sm font-medium aria-pressed:bg-primary aria-pressed:text-primary-foreground">INR (₹)</button>
+    <button type="button" data-currency-btn="USD" aria-pressed="false" class="rounded px-4 py-1.5 text-sm font-medium aria-pressed:bg-primary aria-pressed:text-primary-foreground">USD ($)</button>
+  </div>
+</div>
+<div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+  {PLANS.map((p) => (
+    <div class:list={['card flex flex-col p-6', p.featured && 'ring-2 ring-ring']}>
+      <h2 class="text-lg font-semibold">{p.name}{p.featured && <span class="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">Popular</span>}</h2>
+      <p class="mt-1 text-sm text-muted-foreground">{p.blurb}</p>
+      <p class="mt-4 flex items-baseline gap-1">
+        <span data-currency="INR" class="text-4xl font-bold">{p.inr}</span>
+        <span data-currency="USD" hidden class="text-4xl font-bold">{p.usd}</span>
+        <span class="text-sm text-muted-foreground">/ month</span>
+      </p>
+      <ul class="mt-5 flex-1 space-y-2 text-sm">
+        {rows.map(([label, key]) => <li class="flex justify-between gap-3 border-b pb-2"><span class="text-muted-foreground">{label}</span><span class="text-right font-medium">{p[key]}</span></li>)}
+      </ul>
+      <a href={REGISTER_URL} class:list={['mt-6', p.featured ? 'btn-primary' : 'btn-outline']}>{p.id === 'free' ? 'Start free' : `Choose ${p.name}`}</a>
+    </div>
+  ))}
+</div>
+<p class="mt-6 text-center text-sm text-muted-foreground">Prices are per month, per account. Taxes such as GST may be added at checkout. Paid plans are not yet charged during the free beta.</p>

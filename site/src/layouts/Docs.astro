@@ -1,0 +1,49 @@
+---
+import { getCollection } from 'astro:content';
+import Base from './Base.astro';
+import { DOC_GROUPS as GROUPS } from "../site.js";
+
+const { title, description, current } = Astro.props;
+const all = (await getCollection('docs')).sort((a, b) => a.data.order - b.data.order);
+const groups = GROUPS.map((g) => ({ name: g, pages: all.filter((d) => d.data.group === g) }));
+const idx = all.findIndex((d) => d.id === current);
+const prev = idx > 0 ? all[idx - 1] : null;
+const next = idx >= 0 && idx < all.length - 1 ? all[idx + 1] : null;
+---
+<Base title={title} description={description}>
+  <div class="wrap grid gap-8 py-10 lg:grid-cols-[16rem_1fr]">
+    <aside class="lg:sticky lg:top-24 lg:self-start">
+      <details class="rounded-lg border lg:hidden">
+        <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium">Docs menu</summary>
+        <div class="border-t p-4">
+          {groups.map((g) => (
+            <div class="mb-4 last:mb-0">
+              <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</p>
+              <ul class="mt-2 space-y-1">{g.pages.map((d) => <li><a href={`/docs/${d.id}`} class="block rounded-md px-2 py-1 text-sm hover:bg-accent">{d.data.title}</a></li>)}</ul>
+            </div>
+          ))}
+        </div>
+      </details>
+      <nav aria-label="Docs" class="hidden lg:block">
+        {groups.map((g) => (
+          <div class="mb-6">
+            <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</p>
+            <ul class="mt-2 space-y-1">
+              {g.pages.map((d) => (
+                <li><a href={`/docs/${d.id}`} aria-current={d.id === current ? 'page' : undefined} class:list={['block rounded-md px-2 py-1.5 text-sm hover:bg-accent', d.id === current ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-accent-foreground']}>{d.data.title}</a></li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </aside>
+    <article class="min-w-0">
+      <div class="prose-doc"><slot /></div>
+      <nav aria-label="Previous and next" class="mt-12 flex max-w-3xl justify-between gap-4 border-t pt-6 text-sm">
+        {prev ? <a href={`/docs/${prev.id}`} class="font-medium underline underline-offset-4">&larr; {prev.data.title}</a> : <span />}
+        {next ? <a href={`/docs/${next.id}`} class="font-medium underline underline-offset-4">{next.data.title} &rarr;</a> : <span />}
+      </nav>
+      <p class="mt-6 text-sm text-muted-foreground">Still stuck? <a href="/contact" class="underline underline-offset-4">Contact us</a> and include the output of <code class="rounded bg-muted px-1.5 py-0.5 font-mono">sudo yuktiops-agent doctor</code>.</p>
+    </article>
+  </div>
+</Base>

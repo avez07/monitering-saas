@@ -1,0 +1,14 @@
+---
+import Base from './Base.astro';
+const { title, description } = Astro.props;
+---
+<Base title={title} description={description}>
+  <section class="section">
+    <div class="wrap prose-doc">
+      <p role="note" class="mb-6 rounded-md border bg-muted p-4 text-sm"><strong>Draft for legal review.</strong> This text is a starting point written in plain language. It is not legal advice and has not been reviewed by a lawyer. It must be reviewed and completed before launch.</p>
+      <h1>{title}</h1>
+      <p class="text-sm text-muted-foreground">Last updated: draft, not yet in force.</p>
+      <slot />
+    </div>
+  </section>
+</Base>

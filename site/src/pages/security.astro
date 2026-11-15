@@ -1,0 +1,43 @@
+---
+import Base from '../layouts/Base.astro';
+import Cta from '../components/Cta.astro';
+const collects = ['CPU use, load and uptime', 'Memory and swap use', 'Disk space and disk activity for each drive', 'Network traffic for each network interface', 'The names, CPU and memory of the 10 busiest programs'];
+const never = ['The contents of your files, databases or emails', 'Your passwords, keys or environment variables', 'Network traffic contents or the websites your server visits', 'Anything about your customers or users', 'The full command line (and so any arguments or passwords in it) of programs'];
+---
+<Base title="How it works and security" description="Exactly what the YuktiOps agent collects and what it never does: no open ports, read-only, outbound HTTPS only, never runs remote commands.">
+  <section class="section">
+    <div class="wrap prose-doc">
+      <h1>How it works and security</h1>
+      <p>A small program, the <strong>agent</strong>, runs on your server. Every 30 seconds it reads basic statistics about the machine and sends them to YuktiOps over a secure HTTPS connection. That is all it does.</p>
+
+      <h2>What the agent collects</h2>
+      <ul>{collects.map((c) => <li>{c}</li>)}</ul>
+      <p>We also record the server's hostname, operating system and agent version so the dashboard can show them.</p>
+
+      <h2>What it does not collect</h2>
+      <ul>{never.map((c) => <li>{c}</li>)}</ul>
+      <blockquote>The agent reads statistics. It cannot read your application data.</blockquote>
+      <p>One detail to be open about: the list of busiest programs shows each program's short name (for example <code>nginx</code>), its process number, and its CPU and memory use. It does not include the full command line.</p>
+
+      <h2>How it stays out of the way</h2>
+      <ul>
+        <li><strong>No open ports.</strong> It only makes outbound HTTPS connections to one address. Nobody can connect to it.</li>
+        <li><strong>Small.</strong> A design target of under 25 MB of memory and under 1% CPU. The system service enforces hard caps (64 MB and 10% of a core).</li>
+        <li><strong>Read-only.</strong> It does not change files or settings on your server.</li>
+        <li><strong>Never runs remote commands.</strong> The only thing we can change from the dashboard is which built-in, read-only collectors are on and how often. The agent has no way to run a command we send.</li>
+        <li><strong>Least privilege.</strong> It runs as its own unprivileged user, <code>yuktiops</code>, with systemd protections such as <code>NoNewPrivileges</code> and a read-only file system view.</li>
+        <li><strong>Docker is opt-in.</strong> Reading Docker stats needs access to the Docker socket, which is powerful. We only enable it if you tick Containers.</li>
+        <li><strong>Safe credentials.</strong> The account API key is used once to register a server and is not stored on it. Each server gets its own credential that you can revoke from the dashboard.</li>
+        <li><strong>Verified downloads.</strong> The installer checks the SHA-256 checksum of what it downloads and stops if it does not match.</li>
+      </ul>
+
+      <h2>Open source</h2>
+      <p>Customers should be able to read code that runs on their servers. Our plan is to publish the agent as open source under the Apache-2.0 licence. Until that is done, we cannot promise a date. We will update this page when the code is public.</p>
+
+      <h2>Your data</h2>
+      <p>Measurements are kept for the history length of your plan (7 days to 1 year) and then deleted. See the <a href="/privacy">privacy policy</a> draft for more.</p>
+      <p>Found a security problem? Please tell us on the <a href="/contact">contact page</a>.</p>
+    </div>
+  </section>
+  <Cta />
+</Base>

@@ -1,0 +1,18 @@
+---
+import Base from '../layouts/Base.astro';
+import { CONTACT_EMAIL } from '../site.js';
+---
+<Base title="Contact" description="Contact YuktiOps for help, sales questions or to report a security problem.">
+  <section class="section">
+    <div class="wrap prose-doc">
+      <h1>Contact</h1>
+      <p>Write to us at <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>. We read every message.</p>
+      <ul>
+        <li><strong>Need help with setup?</strong> First try the <a href="/docs/troubleshooting">troubleshooting guide</a>. If that does not solve it, send us the output of <code>sudo yuktiops-agent doctor</code>.</li>
+        <li><strong>Billing or refunds?</strong> See the <a href="/refunds">refund policy</a>, then write to us.</li>
+        <li><strong>Security report?</strong> Put "Security" in the subject line.</li>
+      </ul>
+      <blockquote>Placeholder: confirm this mailbox and add a postal address and support hours before launch.</blockquote>
+    </div>
+  </section>
+</Base>

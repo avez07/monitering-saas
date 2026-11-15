@@ -5,7 +5,8 @@
   "version": "0.1.0",
   "workspaces": [
     "frontend",
-    "backend"
+    "backend",
+    "site"
   ],
   "scripts": {
     "dev": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev -w backend\" \"npm run worker:dev -w backend\" \"npm run dev -w frontend\"",
@@ -22,7 +23,13 @@
     "agent:dist": "node agent/scripts/dist.mjs",
     "agent:test": "node agent/scripts/dist.mjs --test",
     "check": "npm test && npm run build && npm run db:validate -w backend",
-    "worker": "npm run worker -w backend"
+    "worker": "npm run worker -w backend",
+    "loadtest": "node deploy/loadtest/loadtest.mjs",
+    "deploy:release": "bash deploy/deploy.sh",
+    "deploy:rollback": "bash deploy/rollback.sh",
+    "deploy:backup-check": "bash deploy/backup/check.sh",
+    "site:dev": "npm run dev -w site",
+    "site:build": "npm run build -w site"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

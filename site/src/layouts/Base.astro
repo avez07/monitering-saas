@@ -1,0 +1,40 @@
+---
+import '../styles/index.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { SITE_URL } from '../site.js';
+
+const { title, description, path = Astro.url.pathname, jsonLd = null, noindex = false } = Astro.props;
+const fullTitle = title.includes('YuktiOps') ? title : `${title} | YuktiOps`;
+const canonical = SITE_URL + (path === '/' ? '' : path.replace(/\/$/, ''));
+const image = `${SITE_URL}/og.png`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex" />}
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="YuktiOps" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={image} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline src="/theme.js"></script>
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+  </head>
+  <body class="flex min-h-screen flex-col">
+    <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground">Skip to content</a>
+    <Header />
+    <main id="main" class="flex-1"><slot /></main>
+    <Footer />
+    <script is:inline src="/toggles.js" defer></script>
+  </body>
+</html>

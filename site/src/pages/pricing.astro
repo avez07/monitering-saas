@@ -1,0 +1,43 @@
+---
+import Base from '../layouts/Base.astro';
+import PricingGrid from '../components/PricingGrid.astro';
+import Cta from '../components/Cta.astro';
+
+const faq = [
+  ['Is the Free plan really free?', 'Yes. Free includes 2 servers and 5 website checks, with 7 days of history. No credit card is needed to sign up.'],
+  ['What counts as a server?', 'Each machine (VPS, cloud instance or physical server) that runs our agent counts as one. Website and API checks do not count as servers.'],
+  ['I only have shared hosting. Can I use YuktiOps?', 'Yes. Shared hosting does not let you install programs, but website and API checks work from the outside, with nothing to install.'],
+  ['Can I change plans or cancel?', 'Yes, at any time. See our refund policy for what happens to a paid month.'],
+  ['What happens if I go over my limit?', 'We stop adding new servers or checks past your plan limit and tell you why. Servers already connected keep working.'],
+  ['Which currencies and payment methods?', 'Prices are listed in Indian rupees (INR) and US dollars (USD). Payment will be through Razorpay (INR) and Stripe (USD). Payments are not switched on yet during the free beta.'],
+  ['Do prices include tax?', 'Taxes such as GST, where they apply, are added at checkout.'],
+];
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+};
+---
+<Base title="Pricing" description="Simple pricing in INR and USD. Free plan with 2 servers and 5 website checks. Paid plans from ₹599 or $9 a month." jsonLd={jsonLd}>
+  <section class="section">
+    <div class="wrap">
+      <h1 class="text-center text-4xl font-bold tracking-tight">Simple, affordable pricing</h1>
+      <p class="mx-auto mt-4 max-w-xl text-center text-lg text-muted-foreground">Start free. Pay only when you outgrow it.</p>
+      <div class="mt-10"><PricingGrid /></div>
+    </div>
+  </section>
+  <section class="section border-t bg-muted/40" aria-labelledby="faq">
+    <div class="wrap max-w-3xl">
+      <h2 id="faq" class="text-3xl font-bold tracking-tight">Questions</h2>
+      <div class="mt-6 divide-y rounded-lg border bg-card">
+        {faq.map(([q, a]) => (
+          <details class="group p-4">
+            <summary class="cursor-pointer list-none font-medium">{q}</summary>
+            <p class="mt-2 text-muted-foreground">{a}</p>
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+  <Cta />
+</Base>

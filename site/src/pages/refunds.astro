@@ -1,0 +1,14 @@
+---
+import Legal from '../layouts/Legal.astro';
+import { CONTACT_EMAIL } from '../site.js';
+---
+<Legal title="Refund Policy" description="Draft refund and cancellation policy for YuktiOps.">
+  <h2>Free plan</h2>
+  <p>The Free plan costs nothing, so there is nothing to refund.</p>
+  <h2>Cancelling a paid plan</h2>
+  <p>You can cancel at any time from Settings. Your plan stays active until the end of the period you paid for, then moves to Free. [Confirm.]</p>
+  <h2>Refunds</h2>
+  <p>[Proposed, to be confirmed by the owner and counsel: if you are not happy, write to us within 14 days of your first payment and we will refund it in full. Later payments are not refunded, except where the law says so or we made a serious mistake.]</p>
+  <h2>How to ask</h2>
+  <p>Email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> from your account address. Refunds go back to the original payment method (Razorpay or Stripe) and can take 5 to 10 business days.</p>
+</Legal>

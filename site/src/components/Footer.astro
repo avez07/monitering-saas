@@ -1,0 +1,26 @@
+---
+import { REGISTER_URL, CONTACT_EMAIL } from '../site.js';
+const cols = [
+  { h: 'Product', l: [['Features', '/features'], ['Pricing', '/pricing'], ['Security', '/security'], ['Start free', REGISTER_URL]] },
+  { h: 'Docs', l: [['Getting started', '/docs/getting-started'], ['Install the agent', '/docs/install'], ['Troubleshooting', '/docs/troubleshooting'], ['Agent commands', '/docs/agent-commands']] },
+  { h: 'Company', l: [['Contact', '/contact'], ['Privacy', '/privacy'], ['Terms', '/terms'], ['Refunds', '/refunds']] },
+];
+---
+<footer class="border-t bg-muted/40">
+  <div class="wrap grid gap-8 py-12 sm:grid-cols-2 lg:grid-cols-4">
+    <div>
+      <p class="text-lg font-bold">YuktiOps</p>
+      <p class="mt-2 max-w-xs text-sm text-muted-foreground">Simple, affordable server monitoring for small teams on a VPS or shared hosting.</p>
+      <p class="mt-3 text-sm"><a class="underline underline-offset-4" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
+    </div>
+    {cols.map((c) => (
+      <nav aria-label={`${c.h} links`}>
+        <p class="text-sm font-semibold">{c.h}</p>
+        <ul class="mt-3 space-y-2 text-sm text-muted-foreground">
+          {c.l.map(([t, h]) => <li><a href={h} class="hover:text-foreground">{t}</a></li>)}
+        </ul>
+      </nav>
+    ))}
+  </div>
+  <div class="border-t"><p class="wrap py-4 text-xs text-muted-foreground">&copy; {new Date().getFullYear()} YuktiOps. All rights reserved.</p></div>
+</footer>
