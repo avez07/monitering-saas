@@ -21,6 +21,7 @@ import { containerRoutes } from './routes/containers.js';
 import { serviceRoutes } from './routes/services.js';
 import { downloadsStatic, releasesRoute } from './routes/downloads.js';
 import { billingRoutes, billingWebhookRoutes } from './routes/billing.js';
+import { internalRoutes } from './routes/metrics-internal.js';
 
 export function createApp(store, limits) {
   const app = express();
@@ -61,6 +62,8 @@ export function createApp(store, limits) {
       res.status(503).json({ status: 'unavailable' });
     }
   });
+  // /metrics and /admin/queues: internal only (token / loopback / basic auth); the edge never routes them.
+  app.use(internalRoutes(store));
   // Provider webhooks need the exact raw body for signature checks, so they run before the JSON parser.
   app.use('/api/webhooks', billingWebhookRoutes(store));
   // The agent protocol. Bearer credentials only (no cookies), and gzip bodies are accepted. This runs

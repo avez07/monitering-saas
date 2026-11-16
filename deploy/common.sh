@@ -27,33 +27,44 @@ env_value() { grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true; }
 # Best-effort ping to a monitoring URL (healthchecks.io style). Never fails the caller.
 ping_url() { if [ -n "${1:-}" ]; then curl -fsS -m 10 --retry 2 -o /dev/null "$1" || true; fi; }
 
-# wait_healthy <service> <timeout-seconds>: poll the container health status.
+# Worker role services (docker-compose.prod.yml); each has its own /healthz healthcheck.
+WORKER_SERVICES="worker-ingest worker-checks worker-alerts worker-notify worker-housekeeping"
+
+# wait_healthy <service> <timeout-seconds>: poll the container health status of every replica.
 wait_healthy() {
-  local service=$1 timeout=${2:-120} waited=0 id status
-  id=$(dc ps -q "$service")
-  [ -n "$id" ] || return 1
+  local service=$1 timeout=${2:-120} waited=0 ids id status bad
+  ids=$(dc ps -q "$service")
+  [ -n "$ids" ] || return 1
   while [ "$waited" -lt "$timeout" ]; do
-    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || echo missing)
-    case "$status" in
-      healthy | running) return 0 ;;
-      unhealthy | exited | dead | missing) if [ "$waited" -ge 30 ]; then return 1; fi ;;
-    esac
+    bad=0
+    for id in $ids; do
+      status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || echo missing)
+      case "$status" in
+        healthy | running) ;;
+        unhealthy | exited | dead | missing) if [ "$waited" -ge 30 ]; then return 1; fi; bad=1 ;;
+        *) bad=1 ;;
+      esac
+    done
+    [ "$bad" = 0 ] && return 0
     sleep 3
     waited=$((waited + 3))
   done
   return 1
 }
 
-# roll_to <tag>: restart api, worker and web on the given image tag, one at a time, each health-gated.
-# Order matters: the API goes first so the worker never runs newer code against an API that failed.
+# roll_to <tag>: restart api (2 replicas), the worker roles and web on the given image tag, one service at
+# a time, each health-gated. The API goes first so the workers never run newer code against an API that
+# failed. Compose recreates replicas one by one, and Caddy only routes to healthy ones.
 roll_to() {
-  local tag=$1
+  local tag=$1 svc
   export APP_TAG=$tag
+  dc up -d --no-build --no-deps pgbouncer || return 1
   dc up -d --no-build --no-deps api || return 1
   wait_healthy api 120 || return 1
-  dc up -d --no-build --no-deps worker || return 1
-  sleep 5
-  [ "$(docker inspect -f '{{.State.Status}}' "$(dc ps -q worker)")" = running ] || return 1
+  for svc in $WORKER_SERVICES; do
+    dc up -d --no-build --no-deps "$svc" || return 1
+    wait_healthy "$svc" 90 || return 1
+  done
   dc up -d --no-build --no-deps web || return 1
   wait_healthy web 60 || return 1
 }

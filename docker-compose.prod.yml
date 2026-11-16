@@ -9,7 +9,15 @@ x-app-env: &app-env
   APP_URL: https://${APP_DOMAIN}
   API_PUBLIC_URL: https://${API_DOMAIN}
   TRUST_PROXY: ${TRUST_PROXY:-172.29.0.0/24}
-  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public&connection_limit=${DB_POOL_SIZE:-20}&pool_timeout=20
+  # The app talks to PgBouncer (transaction pooling). pgbouncer=true turns off prepared statements.
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB}?schema=public&pgbouncer=true&connection_limit=${DB_POOL_SIZE:-10}&pool_timeout=20
+  # Migrations (deploy.sh) go straight to Postgres, not through the pooler.
+  DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  BULL_BOARD_USER: ${BULL_BOARD_USER:-}
+  BULL_BOARD_PASSWORD: ${BULL_BOARD_PASSWORD:-}
+  INGEST_MAX_WAITING: ${INGEST_MAX_WAITING:-50000}
+  INGEST_MAX_LAG_SECONDS: ${INGEST_MAX_LAG_SECONDS:-60}
   BILLING_PROVIDER: ${BILLING_PROVIDER:-mock}
   BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:?set BILLING_WEBHOOK_SECRET}
   EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
@@ -66,14 +74,17 @@ services:
       retries: 3
     logging: *logging
 
+  # Stateless: run as many replicas as the VM has CPU for (docs/ops.md "Scaling"). Caddy discovers the
+  # replicas through Docker DNS (dynamic upstreams) and health-checks each one.
   api:
     <<: *app-hardening
     environment: *app-env
     networks: [edge, internal]
     depends_on:
-      db: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       redis: { condition: service_healthy }
     deploy:
+      replicas: ${API_REPLICAS:-2}
       resources: { limits: { cpus: '1.5', memory: 768M } }
     healthcheck:
       test:
@@ -87,23 +98,101 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 5
+    # server.js stops accepting, drains, closes DB and Redis, within 10 s; Caddy stops routing on its health check.
     stop_grace_period: 20s
 
-  worker:
+  # One service per worker role (backend/src/worker.js --role). Each has its own /healthz.
+  worker-ingest: &worker
     <<: *app-hardening
-    command: ['node', 'backend/src/worker.js']
+    command: ['node', 'backend/src/worker.js', '--role=ingest']
     environment: *app-env
-    # Outbound internet (uptime checks, alert email/webhooks) via the egress network; DB via internal.
-    networks: [egress, internal]
+    # DB via internal; ingest never needs the internet.
+    networks: [internal]
     depends_on:
-      db: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       redis: { condition: service_healthy }
     deploy:
-      resources: { limits: { cpus: '1.0', memory: 512M } }
-    # No HTTP port: the image's API healthcheck does not apply. Liveness is the worker lease in the database (runbook).
+      resources: { limits: { cpus: '1.5', memory: 768M } }
+    healthcheck: &worker-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:9105/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    # Workers finish the active job, then close (worker.js force-exits after 30 s).
+    stop_grace_period: 40s
+
+  worker-checks:
+    <<: *worker
+    command: ['node', 'backend/src/worker.js', '--role=checks']
+    # Outbound uptime checks need the egress network.
+    networks: [egress, internal]
     healthcheck:
-      disable: true
-    stop_grace_period: 30s
+      <<: *worker-health
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:9101/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  worker-alerts:
+    <<: *worker
+    command: ['node', 'backend/src/worker.js', '--role=alerts']
+    healthcheck:
+      <<: *worker-health
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:9102/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  worker-notify:
+    <<: *worker
+    command: ['node', 'backend/src/worker.js', '--role=notify']
+    # Email, webhooks and Telegram go out through egress.
+    networks: [egress, internal]
+    healthcheck:
+      <<: *worker-health
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:9103/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  worker-housekeeping:
+    <<: *worker
+    command: ['node', 'backend/src/worker.js', '--role=housekeeping']
+    # Domain-expiry lookups (RDAP) need egress.
+    networks: [egress, internal]
+    healthcheck:
+      <<: *worker-health
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:9104/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  # Transaction-mode pooler between the app and Postgres. The app opens many Prisma connections (api
+  # replicas + 5 worker roles); Postgres sees at most DEFAULT_POOL_SIZE + reserve.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p3
+    init: true
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:?set POSTGRES_DB}
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      LISTEN_PORT: '6432'
+      MAX_CLIENT_CONN: '600'
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_POOL_SIZE:-40}
+      RESERVE_POOL_SIZE: '5'
+      SERVER_RESET_QUERY: DISCARD ALL
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+    networks: [internal]
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 128M } }
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-p', '6432']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
 
   redis:
     image: redis:7
@@ -118,6 +207,9 @@ services:
       - everysec
       - --maxmemory-policy
       - noeviction
+      # RDB snapshot as well as the AOF: the file deploy/backup/redis-snapshot.sh ships to R2.
+      - --save
+      - '900 1 300 100'
       - --requirepass
       - ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:

@@ -2,6 +2,14 @@
 // YuktiOps ingest load test: N simulated agents, one account, gzip batches every interval.
 //
 //   node deploy/loadtest/loadtest.mjs --api http://localhost:4020 --agents 500 --duration 300
+//   node deploy/loadtest/loadtest.mjs --apis http://localhost:4020,http://localhost:4021 --agents 5000 //        --duration 1800 --metrics-token $METRICS_TOKEN
+//
+// --apis a,b,c   several API instances; agents are assigned round-robin (setup uses the first one).
+// Queue lag      every 5 s GET <first api>/metrics (--metrics-url to override, --metrics-token or env
+//                METRICS_TOKEN; unauthenticated works only from loopback without a token configured) and
+//                report the max and p99 of yuktiops_ingest_lag_seconds and the peak waiting jobs. After the
+//                run the script waits for the ingest queue to drain and compares rows in the database
+//                with the rows the API accepted (data loss check, direct mode only).
 //
 // SAFETY: this registers hundreds of servers and writes many rows. It refuses to run against
 // anything but localhost unless you pass --i-know-this-is-not-production.
@@ -26,11 +34,17 @@ const arg = (name, fallback) => {
 const flag = (name) => process.argv.includes(name);
 if (flag('--help')) {
   console.log(
-    'Options: --api URL --agents 500 --duration 300 --interval 30 --samples 1 --api-key KEY --origin URL --keep --out file.json',
+    'Options: --api URL | --apis URL,URL --metrics-url URL --metrics-token T --agents 500 --duration 300 --interval 30 --samples 1 --api-key KEY --origin URL --keep --out file.json',
   );
   process.exit(0);
 }
-const api = arg('--api', 'http://localhost:4020').replace(/\/$/, '');
+const apis = (arg('--apis', '') || arg('--api', 'http://localhost:4020'))
+  .split(',')
+  .map((u) => u.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const api = apis[0];
+const metricsUrl = arg('--metrics-url', `${api}/metrics`);
+const metricsToken = arg('--metrics-token', process.env.METRICS_TOKEN || '');
 const agentsN = Number(arg('--agents', 500));
 const durationS = Number(arg('--duration', 300));
 const intervalS = Number(arg('--interval', 30));
@@ -38,15 +52,12 @@ const samplesPer = Number(arg('--samples', 1));
 const appOrigin = arg('--origin', 'http://localhost:5173');
 const providedKey = arg('--api-key');
 const keepData = flag('--keep');
-const host = new URL(api).hostname;
-if (
-  !['localhost', '127.0.0.1', '[::1]'].includes(host) &&
-  !flag('--i-know-this-is-not-production')
-) {
-  console.error(
-    `Refusing to load test ${host}. Use a local API, or pass --i-know-this-is-not-production.`,
-  );
-  process.exit(2);
+for (const target of apis) {
+  const host = new URL(target).hostname;
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(host) && !flag('--i-know-this-is-not-production')) {
+    console.error(`Refusing to load test ${host}. Use a local API, or pass --i-know-this-is-not-production.`);
+    process.exit(2);
+  }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (sorted, p) =>
@@ -191,11 +202,12 @@ function payload() {
 }
 
 async function sendOnce(agent) {
+  const target = apis[agent.n % apis.length];
   const raw = Buffer.from(JSON.stringify(payload()));
   const body = gzipSync(raw);
   const started = performance.now();
   try {
-    const response = await fetch(`${api}/v1/ingest`, {
+    const response = await fetch(`${target}/v1/ingest`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -213,7 +225,7 @@ async function sendOnce(agent) {
     byStatus.set(response.status, (byStatus.get(response.status) || 0) + 1);
     latencies.push(ms);
     windowLat.push(ms);
-    if (response.ok) acceptedRows += json.accepted || 0;
+    if (response.ok) acceptedRows += json.accepted ?? samplesPer; // 202 carries no count: one row per sample
     else {
       windowErr++;
       if (windowErr <= 3) console.warn(`HTTP ${response.status}: ${JSON.stringify(json)}`);
@@ -251,10 +263,40 @@ async function dbReport() {
   };
 }
 
+// ---- queue lag readout (GET /metrics, Prometheus text) -----------------------------------------------
+const lagSamples = [];
+let peakWaiting = 0;
+let metricsErrors = 0;
+async function readMetrics() {
+  try {
+    const response = await fetch(metricsUrl, {
+      headers: metricsToken ? { Authorization: `Bearer ${metricsToken}` } : {},
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    const lag = /^yuktiops_ingest_lag_seconds (\S+)/m.exec(text);
+    const waiting = /^yuktiops_queue_jobs\{queue="ingest",state="waiting"\} (\S+)/m.exec(text);
+    const accepted = /^yuktiops_ingest_accepted_total (\S+)/m.exec(text);
+    const reading = {
+      lagSeconds: lag ? Number(lag[1]) : null,
+      waiting: waiting ? Number(waiting[1]) : null,
+      accepted: accepted ? Number(accepted[1]) : null,
+    };
+    if (reading.lagSeconds !== null) lagSamples.push(reading.lagSeconds);
+    if (reading.waiting !== null) peakWaiting = Math.max(peakWaiting, reading.waiting);
+    return reading;
+  } catch (error) {
+    if (++metricsErrors <= 2) console.warn(`queue lag readout unavailable (${metricsUrl}): ${error.message}`);
+    return null;
+  }
+}
+
 await setup();
 console.log(
-  `Sending from ${agents.length} agents every ~${intervalS}s for ${durationS}s (${samplesPer} sample(s) per batch) to ${api}`,
+  `Sending from ${agents.length} agents every ~${intervalS}s for ${durationS}s (${samplesPer} sample(s) per batch) to ${apis.join(', ')}`,
 );
+const lagTimer = setInterval(readMetrics, 5000);
 stopAt = Date.now() + durationS * 1000;
 const ticker = setInterval(() => {
   const s = [...windowLat].sort((a, b) => a - b);
@@ -268,6 +310,16 @@ const ticker = setInterval(() => {
 }, intervalS * 1000);
 await Promise.all(agents.map(runAgent));
 clearInterval(ticker);
+clearInterval(lagTimer);
+
+// Let the workers finish what the API accepted, then compare with what is in the database.
+const drainStart = Date.now();
+let finalReading = await readMetrics();
+while (finalReading && finalReading.waiting > 0 && Date.now() - drainStart < 120000) {
+  await sleep(2000);
+  finalReading = await readMetrics();
+}
+const drainSeconds = +((Date.now() - drainStart) / 1000).toFixed(1);
 
 const sorted = [...latencies].sort((a, b) => a - b);
 const failures =
@@ -292,6 +344,15 @@ const report = {
   networkErrors,
   errorRatePercent: +((100 * failures) / Math.max(1, total)).toFixed(3),
   acceptedRows,
+  apis,
+  queueLag: {
+    available: lagSamples.length > 0,
+    readings: lagSamples.length,
+    ingestLagSecondsMax: +Math.max(0, ...lagSamples).toFixed(2),
+    ingestLagSecondsP99: +pct([...lagSamples].sort((a, b) => a - b), 99).toFixed(2),
+    peakWaitingJobs: peakWaiting,
+    secondsToDrainAfterStop: drainSeconds,
+  },
   avgPayloadBytes: { raw: Math.round(bytesRaw / Math.max(1, sent)), gzip: Math.round(bytesGz / Math.max(1, sent)) },
   windows,
   db: await dbReport(),

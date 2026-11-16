@@ -25,25 +25,40 @@ No secrets live in this repository. `.env.production.example` contains `CHANGE_M
 
 ```
 Internet -> Cloudflare (proxy, WAF, rate limits) -> VM :443
-  web (Caddy: TLS, gzip, security headers)
+  web (Caddy: TLS, gzip, security headers, health-checked load balancing)
     app.yuktiops.com  /            static React build (SPA fallback)
-                      /api /v1 /downloads -> api:4000
-    api.yuktiops.com  everything   -> api:4000   (agents, health checks)
-  api    (Node, port 4000, internal only)      networks: edge + internal
-  worker (Node, uptime checks/alerts/email)    networks: egress + internal
+                      /api /v1 /downloads -> api replicas (port 4000)
+    api.yuktiops.com  everything   -> api replicas   (agents, health checks)
+    /metrics and /admin/*          answered 404 at the edge, never proxied
+  api x2          (Node, stateless, internal only)        networks: edge + internal
+  worker-ingest   (drains the ingest queue into Postgres) network: internal
+  worker-checks   (uptime checks)                         networks: egress + internal
+  worker-alerts   (alert evaluation)                      network: internal
+  worker-notify   (email, webhooks, Telegram)             networks: egress + internal
+  worker-housekeeping (schedulers, purges, dunning, RDAP) networks: egress + internal
+  redis  (queues, shared limits, agent cache; AOF + RDB; password; no published port)  network: internal
+  pgbouncer (transaction pooling in front of Postgres)    network: internal
   db     (TimescaleDB on Postgres 16 + pgBackRest) network: internal only (no route out, no published port)
 ```
 
-- One image (`yuktiops-app:<tag>`) runs both `api` and `worker` (different command); `yuktiops-web:<tag>` holds
+- One image (`yuktiops-app:<tag>`) runs `api` and every worker role (different command); `yuktiops-web:<tag>` holds
   Caddy plus the built frontend, so a release is atomic and rolls back as a unit.
 - Containers run read-only, with all Linux capabilities dropped, no-new-privileges, memory/CPU limits and
-  `restart: unless-stopped`. Logs rotate (20 MB x 5).
+  `restart: unless-stopped`. Logs rotate (20 MB x 5). Each worker role has a healthcheck on its own `/healthz` port
+  (checks 9101, alerts 9102, notify 9103, housekeeping 9104, ingest 9105) and a 40 s `stop_grace_period` (the worker
+  finishes its active job and closes); the API has 20 s (stops accepting, drains, closes Redis).
 - `TRUST_PROXY` must name the `edge` subnet (`172.29.0.0/24`, defined in `docker-compose.prod.yml`). Without it
   every client looks like one IP and rate limits hit everybody (or can be spoofed).
-- The Postgres pool is set by `DB_POOL_SIZE` (default 20 per process) through the `connection_limit` URL
-  parameter. Postgres `max_connections=100` leaves room for api + worker + migrations + backups.
-- Scaling out later: the API's rate limiter is in-process memory (see section 9 findings), so run a single API
-  replica until it moves to the database.
+- **PgBouncer** (transaction mode) sits between the app and Postgres. The app URL carries
+  `?pgbouncer=true&connection_limit=${DB_POOL_SIZE}` (default 10 per process; 2 API replicas + 5 workers = 70 client
+  connections at most, multiplexed onto `PGBOUNCER_POOL_SIZE`, default 40, server connections). Migrations must bypass it:
+  `deploy.sh` runs them with `DATABASE_URL=$DIRECT_DATABASE_URL` (straight to `db:5432`). If you run `prisma migrate`
+  by hand, do the same. Postgres `max_connections=100` therefore only has to cover the pooler, pgBackRest, psql and migrations.
+- Scaling: see section 9.2 ("Scaling out").
+- Internal endpoints: `GET /metrics` (Prometheus text) needs `Authorization: Bearer $METRICS_TOKEN` (or, with no token set,
+  a direct loopback connection); scrape it from inside the Docker network (`http://api:4000/metrics`). Bull Board at
+  `/admin/queues` exists only when `BULL_BOARD_USER` and `BULL_BOARD_PASSWORD` are set and needs the `@bull-board/*` packages
+  (pinned 9.13.1); reach it through an SSH tunnel to a container, since the edge returns 404.
 
 ## 3. First bring-up
 
@@ -185,6 +200,39 @@ Restore drill log (append a row each time):
 The tooling was exercised on the local Docker engine with a posix repository standing in for R2 (the only
 difference is `PGBACKREST_REPO1_TYPE`); see the verification log at the end of section 9.
 
+### 6.2 Redis (queues, shared limits, caches)
+
+Redis is not the system of record: Postgres is. It holds work in flight (ingest and notification jobs), rate limit
+and lockout counters, and caches. Losing it costs the jobs that were queued at that moment (agents re-send their buffer,
+`notificationDelivery` rows are swept back into the queue by the housekeeping `notify-sweep`) and resets limiters.
+
+- **Persistence**: AOF with `appendfsync everysec` (at most about 1 s of queue writes lost on a crash) plus RDB snapshots
+  (`--save 900 1 300 100`), `noeviction` so nothing is silently dropped, data in the `redis-data` volume.
+- **Off-VM copy**: `deploy/backup/redis-snapshot.sh` (cron every 6 hours, see `deploy/backup/cron.example`) runs `BGSAVE`, copies
+  `dump.rdb` and uploads it to R2 under `redis/dump-<timestamp>.rdb` (needs the AWS CLI on the host and the `R2_*` values).
+  Add an R2 lifecycle rule that expires only the `redis/` prefix after 14 days (do not touch the pgBackRest prefix).
+- **Restore**: `dcp stop worker-ingest worker-checks worker-alerts worker-notify worker-housekeeping api`, `dcp stop redis`,
+  put the downloaded file at `/data/dump.rdb` in the volume and **delete `/data/appendonlydir`** (Redis prefers the AOF
+  when it exists), `dcp start redis`, then start `api` and the workers. Normally you do not need this: restart Redis
+  and it reloads the AOF. See the runbook entry "Redis down".
+
+### 6.3 Metric retention (TimescaleDB)
+
+Raw samples are removed by Timescale retention policies that **drop whole chunks** (migration
+`20261117010000_retention_policies_container_1h`), not by an hourly DELETE:
+
+| Table | Compress after | Drop after | Served ranges |
+| --- | --- | --- | --- |
+| `server_metrics`, `container_metrics` (raw) | 2 days | 8 days | 1 h, 24 h, 7 d |
+| `server_metrics_5m` | | 95 days | 30 d, 90 d |
+| `server_metrics_1h`, `container_metrics_1h` | | 400 days | 365 d (longest plan is 365) |
+
+The 7-day plan only sees 7 days because reads clamp each organization to its plan (`retentionCutoff`); the 8th day is a
+margin for backfill and clock skew. The housekeeping `trim-metrics` job now only verifies that the policies exist and logs
+`MISSING retention policy` if a restore lost them (check `select * from timescaledb_information.jobs where proc_name like 'policy_%'`).
+`container_metrics_1h` mirrors `server_metrics_1h` (refresh every 30 min, real-time aggregation on); the container
+chart still reads raw rows for 1 h, 24 h and 7 d, and a future "30 days" container range should read this aggregate.
+
 ## 7. Releases and rollback
 
 ### Tagging
@@ -245,7 +293,7 @@ point-in-time recovery (runbook: "Bad migration or data loss").
    Postgres logs slow queries (over 500 ms) and checkpoints.
 5. **On-call basics**: keep `docs/runbook.md` open during incidents; after each one add what you learned.
 
-## 9. Load test: 500 agents
+## 9. Load test: 500 agents, then 5,000
 
 Tool: `deploy/loadtest/loadtest.mjs` (Node built-ins only plus the repo's own backend modules for local setup).
 It refuses to run against anything but localhost unless `--i-know-this-is-not-production` is passed.
@@ -321,6 +369,69 @@ database write amplification (finding 3), not CPU. Re-run on the production-size
 - `deploy.sh` (backup check, pre-deploy backup, migrations, rolling restart, smoke test), automatic rollback of a release whose
   API crashes (previous tag restarted, exit code 1), and `rollback.sh` were each run end to end on a throwaway compose project
   (Caddy replaced by a stub image because the frontend build was broken).
+
+### 9.1 Scale test: 5,000 agents (procedure and done-when targets)
+
+Targets from `PLAN_2.md` Part A.7, on **one 8-vCPU VM** with the production compose stack (2 API replicas, one process per
+worker role, PgBouncer, Redis). **None of these have been measured yet**: the only run so far is the 50-agent smoke test below,
+on a laptop. Do not report the targets as met until the run below passes on the real hardware.
+
+| Check | Target |
+| --- | --- |
+| 5,000 agents, 30 s interval (about 170 req/s), 30 minutes | no errors beyond retries |
+| 10x burst (about 1,700 req/s), 2 minutes | no errors beyond retries |
+| Ingest accept latency | p99 < 50 ms |
+| Ingest queue lag (`yuktiops_ingest_lag_seconds`) | p99 < 10 s |
+| Data loss | 0 (`acceptedRows` equals `server_metrics_rows`) |
+| Kill one API and one worker mid-run | no errors beyond retries; the replica comes back healthy |
+| Alert latency | server offline alert within the 3 minute target |
+| 2,000 website monitors | every check finishes within its interval |
+
+Procedure (staging VM that mirrors production, never production data):
+
+```bash
+# 1. a staging stack: same compose file, a fresh database, METRICS_TOKEN set in .env.production
+dcp up -d
+# 2. generator (a different machine, or the same VM with --i-know-this-is-not-production over localhost/loopback ports)
+export METRICS_TOKEN=...   # read by the load test for the queue lag readout
+export DATABASE_URL='postgresql://...@localhost:5432/yuktiops_load?schema=public'   # direct, for registering agents and counting rows
+node deploy/loadtest/loadtest.mjs --apis http://127.0.0.1:4001,http://127.0.0.1:4002   --metrics-url http://127.0.0.1:4001/metrics --agents 5000 --duration 1800 --interval 30 --out run-30min.json
+node deploy/loadtest/loadtest.mjs --apis ... --agents 5000 --duration 120 --interval 3 --out run-burst.json   # 10x burst
+# 3. failure drill during the 30 minute run
+dcp kill -s SIGKILL api   # then wait for the replica to come back: dcp ps
+dcp kill -s SIGKILL worker-ingest
+# 4. read the JSON: latencyMs.p99, errorRatePercent, queueLag.ingestLagSecondsP99, acceptedRows vs db.server_metrics_rows
+```
+
+`--apis a,b,c` spreads agents over several API instances (round-robin; on one VM publish each replica on its own loopback
+port, or use the public URL to include Caddy). The `queueLag` block of the result comes from `GET /metrics` polled every 5 s
+and from waiting for the ingest queue to drain after the run (`secondsToDrainAfterStop`). Without a readable `/metrics` it is
+`available: false`. Alert latency and the 2,000-monitor check are verified in the product (an offline alert after killing an agent; the monitors'
+`lastCheckedAt`), not by this script.
+
+### 9.2 Scaling out
+
+- **More API capacity**: `API_REPLICAS=4 dcp up -d --no-deps api` (the default is 2; the API is stateless: sessions, limits and
+  the agent cache live in Postgres and Redis). Caddy re-resolves `api` every 5 s and skips a replica that fails. Keep
+  `replicas x DB_POOL_SIZE` (clients of PgBouncer) below its `MAX_CLIENT_CONN` (600).
+- **More worker capacity**: any role can run several copies (`dcp up -d --scale worker-ingest=3 worker-ingest`; a scheduled job
+  still runs once). Each copy's `/healthz` port is inside its own container, so there is no port clash. Raise `worker-ingest`
+  first when `yuktiops_ingest_lag_seconds` grows, `worker-checks` for late uptime checks, `worker-notify` for slow delivery.
+- **Pooler**: `PGBOUNCER_POOL_SIZE` is the number of real Postgres connections (default 40). Keep it plus the reserve and
+  maintenance connections below `max_connections` (100).
+- **Vertical**: raise the CPU and memory limits in `docker-compose.prod.yml` and `shared_buffers`/`effective_cache_size` on `db`
+  together (shared_buffers is about 25 percent of the db memory limit).
+- **Observability**: Prometheus scrapes `http://api:4000/metrics` with the bearer token (`yuktiops_queue_jobs{queue,state}`,
+  `yuktiops_queue_lag_seconds{queue}`, `yuktiops_ingest_lag_seconds`, `yuktiops_ingest_accepted_total`,
+  `yuktiops_notification_failures_1h`). Batch insert latency and alert evaluation duration are not exported yet.
+
+### 9.3 Smoke run (2026-11-16, laptop, not the target hardware)
+
+50 agents, 10 s interval, 60 s, one API process and one `--role=all` worker on a laptop; Postgres/Timescale and Redis in
+Docker, the API and worker connecting through a PgBouncer container (transaction mode, `pgbouncer=true`, `connection_limit=10`).
+Result: 300 requests, all `202`, 0 errors, p50 6.6 ms, p95 31 ms, p99 50.5 ms (first window includes cold start; steady windows
+p99 10 to 14 ms), ingest queue lag 0 s and 0 waiting jobs at every 5 s reading, 300 rows in `server_metrics` for 300 accepted
+batches (no loss), drain 0 s after stop. This only proves the pipeline and the new readout work; it says nothing about 5,000 agents.
 
 ## 10. Launch checklist
 

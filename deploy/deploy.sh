@@ -3,7 +3,7 @@
 #   deploy/deploy.sh [tag] [--skip-backup-check] [--pull | --no-build]
 #
 # Steps: build (or pull) images tagged <tag> -> backup precheck + pre-deploy backup -> database
-# migrations as their own step -> rolling restart (api, worker, web) with health gates -> public smoke
+# migrations as their own step -> rolling restart (api x2, worker roles, web) with health gates -> public smoke
 # test. If anything after the migration step fails, the previous release is started again automatically.
 # The default tag is the short git SHA of the checked-out commit. See docs/ops.md "Releases and rollback".
 set -euo pipefail
@@ -72,12 +72,14 @@ else
 fi
 
 # 3. Migrations: a separate one-shot container on the NEW image ---------------------------------------
+# They bypass PgBouncer (transaction pooling breaks advisory locks and DDL sessions): DIRECT_DATABASE_URL
+# points straight at the db service.
 # Migrations must be backward compatible with the previous release (expand, then contract in a later
 # release), because a rollback restarts the old code on the migrated schema.
 dc up -d db
 wait_healthy db 120 || die "database is not healthy"
 log "running migrations"
-if ! dc run --rm --no-deps -T -e HOME=/tmp api node backend/scripts/prisma.mjs migrate deploy; then
+if ! dc run --rm --no-deps -T -e HOME=/tmp api sh -c 'DATABASE_URL="$DIRECT_DATABASE_URL" exec node backend/scripts/prisma.mjs migrate deploy'; then
   ping_notify /fail
   die "migration FAILED. The running release was not touched. Inspect with: docker compose logs, then see docs/runbook.md (failed migration)"
 fi

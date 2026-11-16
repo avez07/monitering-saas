@@ -1,6 +1,4 @@
 import { entitlements } from './limits.js';
-import { trimRawMetricsByPlan } from './metrics.js';
-import { trimContainerMetricsByPlan } from './containers.js';
 import { runDunning } from './billing.js';
 import { getRedis } from '../lib/redis.js';
 
@@ -77,10 +75,28 @@ export async function purgeEvents(store) {
 export const dunning = (store) =>
   runDunning(store).catch((error) => console.error('[billing] dunning:', error.message));
 
-/** Per-plan raw history limits. */
+export const METRIC_RETENTION_TABLES = ['server_metrics', 'container_metrics'];
+
+/**
+ * Raw metric history is bounded by Timescale retention policies (chunk drop, see the
+ * 20261117010000 migration), not by a DELETE. Per-plan limits are applied when reading. This step only
+ * verifies the policies still exist and logs loudly if not (e.g. a restore without Timescale jobs).
+ * Returns the tables whose retention policy is missing.
+ */
 export async function trimMetrics(store) {
-  await trimRawMetricsByPlan(store);
-  await trimContainerMetricsByPlan(store);
+  let rows;
+  try {
+    rows = await store.client.$queryRaw`
+      SELECT hypertable_name FROM timescaledb_information.jobs
+      WHERE proc_name = 'policy_retention' AND hypertable_schema = 'public'`;
+  } catch (error) {
+    console.error('[housekeeping] cannot verify retention policies:', error.message);
+    return [];
+  }
+  const have = new Set(rows.map((r) => r.hypertable_name));
+  const missing = METRIC_RETENTION_TABLES.filter((t) => !have.has(t));
+  if (missing.length) console.error(`[housekeeping] MISSING retention policy on: ${missing.join(', ')}`);
+  return missing;
 }
 
 /** Every step once, in order. */

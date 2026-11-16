@@ -12,3 +12,5 @@ MAILTO=ops@yuktiops.com
 5 * * * * deploy cd /opt/yuktiops && deploy/backup/check.sh >> /var/log/yuktiops-backup.log 2>&1
 # Monthly restore drill, first Saturday 04:00 (also do it by hand once before launch)
 0 4 1-7 * * deploy [ "$(date +\%u)" = 6 ] && cd /opt/yuktiops && deploy/backup/restore-drill.sh >> /var/log/yuktiops-backup.log 2>&1
+# Redis RDB snapshot to R2 every 6 hours (queues and counters are rebuildable; Postgres is the record)
+30 */6 * * * deploy cd /opt/yuktiops && deploy/backup/redis-snapshot.sh >> /var/log/yuktiops-backup.log 2>&1

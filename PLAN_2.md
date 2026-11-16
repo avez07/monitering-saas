@@ -276,7 +276,7 @@ Inventory (found in code/UI/docs):
 | Phase | What | Depends on | Done when |
 |---|---|---|---|
 | ✅ **16 — Fixes from testing** | All of Part C: Windows Docker command fix and host-mount agent image, Containers without a server ("Docker host"), "Add a service" on the Services page, INR-default billing, step-by-step setup guide | — | each C.x done-when; existing e2e green |
-| **17 — Scale-out** | All of Part A (Redis, BullMQ, PgBouncer, stateless API ×N, workers by role) | 16 | Part A load targets met; all existing tests green |
+| ✅ **17 — Scale-out** | All of Part A (Redis, BullMQ, PgBouncer, stateless API ×N, workers by role) | 16 | Part A load targets met; all existing tests green |
 | **18 — OpenTelemetry for customers** | All of Part D (OTLP ingest, ClickHouse, Apps section, traces/logs explorers, setup page) | 17 | D.4 |
 | **19 — Account gaps and copy** | • Fix stale site/docs copy<br>• **Account:** change name (`PATCH /api/auth/me`), change password in place (current + new; revokes other sessions), transfer ownership (owner → existing admin, email confirmation), delete organization (owner, type-name confirm, 7-day soft delete then purge job on `housekeeping`)<br>• Remove the unused `ComingSoon` component | — | e2e covers each action; docs/team-roles.md matches |
 | **20 — Web server and database monitoring (deep)** | • **Wizard:** enable "Web server" (nginx `stub_status` / Apache `server-status`: requests/s, active connections, error rate from status) and "Databases"<br>• **Agent:** deep metrics with credentials **only in local** `/etc/yuktiops/secrets.yaml` (0600, never sent):<br>&nbsp;&nbsp;– MySQL: connections, QPS, slow queries, replication lag<br>&nbsp;&nbsp;– Postgres: connections, TPS, cache hit, replication lag, DB size<br>&nbsp;&nbsp;– Redis: memory, ops/s, hit rate, evictions<br>• **Backend:** new metric families in a `service_metrics` hypertable; charts on the Services page; new alert templates ("Database connections near max", "Replication lag high")<br>• `yuktiops-agent secrets set mysql` helper | 17 | each collector tested against real DB containers; wizard YAML shows secrets hint, not values |
@@ -363,6 +363,9 @@ Inventory (found in code/UI/docs):
 - Windows comes before macOS, because servers matter more than laptops for this audience.
 
 ## Status
+
+- ✅ **Phase 17** (scale-out) built: Redis limits/cache, async ingest 202, BullMQ workers by role, PgBouncer (prod), Timescale retention + container 1h aggregate, /metrics, prod compose with 2 API replicas. Verified: backend 177 tests, e2e 22/22, 50-agent smoke only. NOT verified: 5,000-agent load targets, prod stack bring-up, Bull Board UI (packages not installed), prisma directUrl (not added).
+
 
 - ✅ **Phase 16** built and tested (backend 156 tests, frontend 8, agent go vet/test, site build, e2e 22/22).
   - Not yet done from C.5: dashboard screenshots in the docs, scripted fresh-Ubuntu / Docker Desktop install e2e, Docker e2e proving `/:/host:ro` reports host totals, and running the new Docker snippets on a real Windows machine.
