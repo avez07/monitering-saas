@@ -15,7 +15,7 @@ import { useCall, useDo } from './api';
 import BillingProfile from './BillingProfile';
 
 /** Minor units (cents, paise) to a price. */
-export const money = (minor, currency = 'USD') =>
+export const money = (minor, currency = 'INR') =>
   new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
     style: 'currency',
     currency,
@@ -129,11 +129,8 @@ export default function Plan() {
 
   const providers = data?.providers || {};
   const paymentsReady = Object.values(providers).some((p) => p.configured);
-  const currencies = ['USD', 'INR'].filter((c) =>
-    Object.values(providers).some((p) => p.currency === c && p.configured),
-  );
   const locked = subscription?.currency; // an active subscription fixes the currency
-  const currency = locked || currencyChoice || currencies[0] || 'USD';
+  const currency = locked || currencyChoice || data?.defaultCurrency || 'INR';
   const gstRate = data?.gst?.rate ?? 0.18;
   const priceOf = (p) => (currency === 'INR' ? p.priceInrPaise : p.priceUsdCents);
   const pastDue = subscription?.status === 'past_due';
@@ -246,8 +243,15 @@ export default function Plan() {
                 Compare plans
               </h2>
               <div className="flex flex-wrap gap-2">
-                {currencies.length > 1 && !locked && (
-                  <Toggle label="Currency" value={currency} onChange={setCurrency} options={currencies.map((c) => [c, c])} />
+                {!locked && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-pressed={currency === 'USD'}
+                    onClick={() => setCurrency(currency === 'USD' ? 'INR' : 'USD')}
+                  >
+                    {currency === 'USD' ? 'Pay in rupees (INR) instead' : 'Pay in USD instead'}
+                  </Button>
                 )}
                 <Toggle
                   label="Billing period"
@@ -286,9 +290,7 @@ export default function Plan() {
                         </span>
                         {price > 0 && (interval === 'annual' ? ' per year' : ' per month')}
                         {price > 0 && currency === 'INR' && (
-                          <span className="block text-xs">
-                            plus {Math.round(gstRate * 100)}% GST
-                          </span>
+                          <span className="block text-xs">+ {Math.round(gstRate * 100)}% GST</span>
                         )}
                       </CardDescription>
                     </CardHeader>

@@ -1,31 +1,107 @@
 # YuktiOps agent
 
-A single static Go binary, `yuktiops-agent`, that reads system statistics and sends them to YuktiOps over outbound HTTPS. No dependencies, no open ports, about 7 MB (3 MB compressed).
+A small program that watches a Linux machine (CPU, memory, disks, network, processes) and sends the numbers to YuktiOps over outbound HTTPS. It opens no ports.
 
-- Linux amd64, arm64 and armv7. Runs as the unprivileged user `yuktiops` under systemd (`Restart=always`, starts on boot).
-- Collects: CPU, memory, swap, disk per mount, disk I/O, network per interface, load, uptime and the top 10 processes. Every 30 seconds by default.
-- Target: under 25 MB RAM and 1% CPU. systemd enforces hard caps (`MemoryMax=64M`, `CPUQuota=10%`).
+## Quick start
 
-## Install
+Get your API key (`yk_live_...`) from the YuktiOps dashboard: Servers, Add a server.
 
-```
-curl -fsSL https://get.yuktiops.com | sudo bash -s -- --key=yk_live_... [--setup=st_...]
-```
-
-The script checks the machine, downloads the right build, **verifies its SHA-256** (and the cosign signature when `cosign` is installed), installs the service, registers the server and waits up to 30 seconds for the first data. Running it again upgrades in place. Options: `--version=`, `--name=`, `--docker` (let the agent read Docker stats), `--no-start`, `--base-url=`, `--api=`. Remove everything with `... | sudo bash -s -- --uninstall` or `sudo yuktiops-agent uninstall`.
-
-Or use a package from the dashboard's Download tab:
+**One command (Linux, easiest)**
 
 ```
-sudo dpkg -i yuktiops-agent_<version>_amd64.deb        # or: sudo rpm -i yuktiops-agent-<version>.x86_64.rpm
+curl -fsSL https://get.yuktiops.com | sudo bash -s -- --key=yk_live_...
+```
+
+**.deb (Debian, Ubuntu)** and **.rpm (Fedora, RHEL, Rocky)**: download from the dashboard's Download tab, then:
+
+```
+sudo dpkg -i yuktiops-agent_<version>_amd64.deb     # rpm: sudo rpm -i yuktiops-agent-<version>.x86_64.rpm
 sudo yuktiops-agent register --key=yk_live_...
 sudo systemctl enable --now yuktiops-agent
 ```
 
-Docker: `docker run -d --name yuktiops-agent --restart unless-stopped -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent` (the image registers itself on first start; the key is not stored). It reports the container's own view of the system.
+**Tarball** (other Linux, no package manager): download `yuktiops-agent_<version>_linux_<arch>.tar.gz` from the Download tab, then:
 
+```
+tar xzf yuktiops-agent_<version>_linux_<arch>.tar.gz
+sudo install -m 0755 yuktiops-agent /usr/local/bin/yuktiops-agent
+sudo cp yuktiops-agent.service /etc/systemd/system/    # needs the yuktiops user: sudo useradd --system --no-create-home yuktiops
+sudo yuktiops-agent register --key=yk_live_...
+sudo systemctl daemon-reload && sudo systemctl enable --now yuktiops-agent
+```
 
-## Containers and services (opt-in, read-only)
+**Docker on a Linux server**
+
+```
+docker run -d --name yuktiops-agent --restart unless-stopped \
+  --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops \
+  ghcr.io/yuktiops/agent
+```
+
+The `--pid host`, `--network host`, `-v /:/host:ro` and `HOST_ROOT` parts make the agent report the server itself. Without them it only sees its own container. Leave out the `docker.sock` line if you do not want container stats.
+
+**Docker Desktop on Windows or Mac.** Important: here the agent monitors Docker's Linux VM and your containers, **not** the Windows or Mac computer itself. Use the same command (`/host` is then the VM).
+
+PowerShell:
+
+```
+docker run -d --name yuktiops-agent --restart unless-stopped `
+  --pid host --network host -v /:/host:ro -e HOST_ROOT=/host `
+  -v /var/run/docker.sock:/var/run/docker.sock:ro `
+  -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops `
+  ghcr.io/yuktiops/agent
+```
+
+Git Bash on Windows rewrites paths like `/var/run/docker.sock` into `C:\Program Files\Git\...` (the error is `mkdir C:\Program Files\Git\var: Access is denied`). Put `MSYS_NO_PATHCONV=1` in front of the command:
+
+```
+MSYS_NO_PATHCONV=1 docker run -d --name yuktiops-agent --restart unless-stopped \
+  --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops \
+  ghcr.io/yuktiops/agent
+```
+
+**Check that it works**
+
+```
+yuktiops-agent status                        # installed on the machine
+docker exec yuktiops-agent yuktiops-agent status   # Docker install
+sudo yuktiops-agent doctor                   # explains any problem and how to fix it
+```
+
+`status` should say "Running, Connected, last data sent ... ago". The server appears in the dashboard within a minute.
+
+**Uninstall**
+
+```
+sudo yuktiops-agent uninstall        # or: sudo apt remove yuktiops-agent / sudo rpm -e yuktiops-agent
+docker rm -f yuktiops-agent && docker volume rm yuktiops-agent    # Docker install
+```
+
+Then remove the server in the dashboard (Servers, choose the server, Remove).
+
+---
+
+## About the agent
+
+- A single static Go binary, no dependencies, about 7 MB. Linux amd64, arm64 and armv7. Runs as the unprivileged user `yuktiops` under systemd (`Restart=always`, starts on boot).
+- Collects CPU, memory, swap, disk per mount, disk I/O, network per interface, load, uptime and the top 10 processes, every 30 seconds by default.
+- Target: under 25 MB RAM and 1% CPU. systemd enforces hard caps (`MemoryMax=64M`, `CPUQuota=10%`).
+
+### Install script options
+
+`--version=`, `--name=`, `--docker` (let the agent read Docker stats), `--no-start`, `--base-url=`, `--api=`, `--uninstall`. The script verifies the download's SHA-256 (and the cosign signature when `cosign` is installed). Running it again upgrades in place.
+
+### Running in a container (`HOST_ROOT`)
+
+A container normally sees only itself. With `HOST_ROOT=/host` and the host's `/` mounted read-only at `/host`, the agent reads `/host/proc`, `/host/sys` and `/host/etc` (OS name, machine id) and reports disk usage of the mounts found under `/host`, so it reports the host. `--pid host` and `--network host` give it the host's process list and network counters. When `HOST_ROOT` is unset nothing changes. `yuktiops-agent doctor` warns "running in a container without host mounts: you will only see the container" when it detects a container without these mounts.
+
+## Reference
+
+### Containers and services (opt-in, read-only)
 
 Switched on from the setup profile in the dashboard (`collectors.docker`, `collectors.services`); nothing is collected until then. Both run in their own goroutine on the send interval, so a slow Docker daemon or a hanging port never delays sampling or sending.
 
@@ -86,7 +162,7 @@ setup_id: "st_0123456789abcdef01234567"
 
 What is collected and how often (`sendIntervalSeconds`, `sampleIntervalSeconds`, and which built-in collectors are on) is managed from the dashboard. The agent pulls it when the version announced in a response changes.
 
-Environment variables (for development and containers): `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`.
+Environment variables (for development and containers): `HOST_ROOT` (see below), `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`.
 
 ## Security model
 
@@ -97,7 +173,7 @@ Environment variables (for development and containers): `YUKTIOPS_CONFIG_DIR`, `
 - **Reliability.** Samples that cannot be sent are kept for up to 15 minutes (in memory, and on disk during an outage) and back-filled in order. Retries use exponential backoff with jitter.
 - **Clock.** If the server's clock is wrong the backend corrects the timestamps; `doctor` tells you how to fix the clock.
 
-## Uninstall
+## Uninstall (details)
 
 ```
 sudo yuktiops-agent uninstall            # remove everything

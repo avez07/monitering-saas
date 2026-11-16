@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/yuktiops/agent/internal/config"
 )
 
 // clockTicksPerSecond is USER_HZ, which is 100 on every Linux architecture.
@@ -27,6 +29,9 @@ type Collector struct {
 	ProcRoot string // normally /proc
 	SysRoot  string // normally /sys
 	EtcRoot  string // normally /etc
+	// HostRoot is where the host's / is mounted in a container (HOST_ROOT), or "" when the agent
+	// runs on the machine itself.
+	HostRoot string
 
 	now      func() time.Time
 	statfs   func(path string) (fsUsage, error)
@@ -55,10 +60,16 @@ type procPrev struct {
 
 // New returns a collector for the running system.
 func New() *Collector {
+	return newAt(config.HostRoot())
+}
+
+// newAt returns a collector that reads the machine mounted at hostRoot ("" for this one).
+func newAt(hostRoot string) *Collector {
 	return &Collector{
-		ProcRoot: "/proc",
-		SysRoot:  "/sys",
-		EtcRoot:  "/etc",
+		ProcRoot: config.HostPath(hostRoot, "/proc"),
+		SysRoot:  config.HostPath(hostRoot, "/sys"),
+		EtcRoot:  config.HostPath(hostRoot, "/etc"),
+		HostRoot: hostRoot,
 		now:      time.Now,
 		statfs:   statfs,
 		pageSize: uint64(os.Getpagesize()),
@@ -204,12 +215,18 @@ func (c *Collector) sampleMemory(s *Sample, en Enabled, report Reporter) {
 }
 
 func (c *Collector) sampleDisk(s *Sample, report Reporter) {
-	data, err := c.read(c.proc("self/mountinfo"))
+	// Inside a container the host's /proc/self belongs to a process the container cannot see, so
+	// the container's own mount table is read and the host's disks are picked out of it.
+	mountinfo := c.proc("self/mountinfo")
+	if c.HostRoot != "" {
+		mountinfo = "/proc/self/mountinfo"
+	}
+	data, err := c.read(mountinfo)
 	if err != nil {
 		report("collector_failed_disk", describe("list the mounted disks", err))
 		return
 	}
-	entries := parseMountinfo(data)
+	entries := hostMounts(parseMountinfo(data), c.HostRoot)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	var denied, failed []string
 	for _, e := range entries {
@@ -366,7 +383,7 @@ func (c *Collector) Processes(report Reporter) []Process {
 		stats = append(stats, p)
 	}
 	c.procScratch = stats
-	if len(stats) <= 1 && c.ProcRoot == "/proc" {
+	if len(stats) <= 1 && c.ProcRoot == config.HostPath(c.HostRoot, "/proc") {
 		report("processes_restricted", "The agent can only see its own process. /proc is probably mounted with hidepid; "+
 			"add the yuktiops user to the group allowed to see all processes, or switch off the process list.")
 	}
@@ -449,4 +466,29 @@ func (c *Collector) Host() HostInfo {
 		}
 	}
 	return h
+}
+
+// hostMounts keeps the mounts under hostRoot and strips the prefix, so /host/data is reported as
+// /data and /host itself as /. With no hostRoot (or none of the mounts under it) the list is
+// returned as it is.
+func hostMounts(entries []mountEntry, hostRoot string) []mountEntry {
+	if hostRoot == "" {
+		return entries
+	}
+	var out []mountEntry
+	for _, e := range entries {
+		switch {
+		case e.Path == hostRoot:
+			e.Path = "/"
+		case strings.HasPrefix(e.Path, hostRoot+"/"):
+			e.Path = e.Path[len(hostRoot):]
+		default:
+			continue
+		}
+		out = append(out, e)
+	}
+	if len(out) == 0 {
+		return entries
+	}
+	return out
 }

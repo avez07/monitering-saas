@@ -5,6 +5,7 @@ import Cta from '../components/Cta.astro';
 const groups = [
   { id: 'servers', h: 'Servers', p: 'Install our small agent on a Linux server (VPS, cloud or your own machine).', items: ['CPU, memory, swap, disk per drive, disk activity, network per interface, load and uptime', 'The 10 busiest programs, so you can see what is using the machine', 'History from 7 days (Free) to 1 year (Business)', 'Clear status words: Healthy, Needs attention, Down, Waiting for data'] },
   { id: 'websites', h: 'Websites and APIs', p: 'Checked from the internet by our servers. No install, so it works on shared hosting too.', items: ['Is it up, and how fast does it answer', 'Look for a word on the page, or check an API for the right status code', 'SSL certificate and domain expiry warnings at 30, 14 and 7 days', 'Checks every 5 minutes (Free), every minute (paid) or every 30 seconds (Business)'] },
+  { id: 'containers', h: 'Docker containers and services', p: 'See what runs on your servers, not only the servers themselves.', items: ['Per-container status, CPU and memory, with an alert when a container stops', 'Service checks for things like nginx, MySQL, Postgres and Redis, with an alert when one stops', 'Monitor Docker containers with no server install: run the agent as a container', 'Add a service from the dashboard in a few clicks'] },
   { id: 'alerts', h: 'Alerts', p: 'Tell us what matters in plain words. We tell you when it happens.', items: ['One-click templates: server down, disk almost full, CPU very high, memory almost full, website down or slow, SSL or domain expiring', 'Send to email, Telegram, Slack, Discord or a signed webhook, with a Send test button', 'Alerts only fire after the problem lasts as long as you chose, so a short spike does not wake you up', 'New accounts start with three useful alerts already on'] },
   { id: 'team', h: 'Team', p: 'Share the dashboard without sharing your password.', items: ['Invite by email with a link that works once', 'Owner, Admin and Viewer roles', 'Remove anyone and their access ends'] },
   { id: 'help', h: 'Built-in help', p: 'Monitoring tools that cannot explain themselves are a pain.', items: ['A Connection page shows each setup step and what is wrong, in plain English', 'The agent has status and doctor commands that test your network, clock and permissions and tell you the fix', 'Everything is in our docs, written for non-technical readers'] },
@@ -24,7 +25,7 @@ const groups = [
           </section>
         ))}
       </div>
-      <p class="mt-10 rounded-md border bg-muted p-4 text-sm"><strong>Coming later:</strong> Docker container and service monitoring (nginx, MySQL, Postgres, Redis), Windows and macOS agents, public status pages. We list only what exists or is clearly marked as planned.</p>
+      <p class="mt-10 rounded-md border bg-muted p-4 text-sm"><strong>Coming later:</strong> native Windows and macOS agents and public status pages. (Docker Desktop on Windows and macOS works today, and monitors Docker's Linux VM.) We list only what exists or is clearly marked as planned.</p>
     </div>
   </section>
   <Cta />

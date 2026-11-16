@@ -31,6 +31,7 @@ export function serverSummary(agent, resource, settings, now = Date.now()) {
     resourceId: resource.id,
     name: resource.name,
     hostname: agent.name,
+    kind: agent.kind || 'server',
     os: agent.os || l.os || '',
     arch: agent.arch,
     platform: agent.platform,
@@ -63,12 +64,13 @@ export async function requireServer(store, orgId, id) {
   return { agent, resource };
 }
 
-export async function listServers(store, orgId) {
+export async function listServers(store, orgId, { includeDockerHosts = false } = {}) {
   const configs = await store.list('agentConfig', { orgId });
   const byId = new Map(configs.map((c) => [c.id, c]));
   const fallback = configs.find((c) => c.isDefault);
   const now = Date.now();
   return (await liveServers(store, orgId))
+    .filter(({ agent }) => includeDockerHosts || (agent.kind || 'server') !== 'docker-host')
     .map(({ agent, resource }) =>
       serverSummary(agent, resource, (byId.get(agent.configId) || fallback)?.settings, now),
     )
@@ -124,24 +126,34 @@ export async function updateServer(store, agent, resource, input) {
   if (input.name !== undefined) await store.update('monitoredResource', resource.id, { name: input.name });
   if (input.config !== undefined) {
     const settings = agentSettingsSchema.parse(input.config);
-    const current = await configForAgent(store, agent);
-    const sharing = await store.list('agent', { orgId: agent.orgId, configId: current.id });
-    const dedicated = !current.isDefault && sharing.every((a) => a.id === agent.id);
-    if (dedicated) {
-      // Agents compare versions, so every change bumps it.
-      await store.update('agentConfig', current.id, { settings, version: current.version + 1 });
-    } else {
-      // Never edit a profile other servers use: give this server its own copy.
-      const own = await store.create('agentConfig', {
-        id: newConfigId(),
-        orgId: agent.orgId,
-        name: input.name ?? resource.name,
-        isDefault: false,
-        settings,
-      });
-      await store.update('agent', agent.id, { configId: own.id });
-    }
+    // A config that does not mention hostKind keeps the host's current kind.
+    if (input.config?.hostKind === undefined) settings.hostKind = agent.kind || 'server';
+    await saveAgentSettings(store, agent, settings, input.name ?? resource.name);
   }
+}
+
+/**
+ * Save validated settings for one agent. A profile only this agent uses is edited in place (version bumped,
+ * so the agent re-pulls); a shared or default profile is never edited, the agent gets its own copy instead.
+ */
+export async function saveAgentSettings(store, agent, settings, copyName) {
+  const current = await configForAgent(store, agent);
+  const sharing = await store.list('agent', { orgId: agent.orgId, configId: current.id });
+  const dedicated = !current.isDefault && sharing.every((a) => a.id === agent.id);
+  if (dedicated) {
+    // Agents compare versions, so every change bumps it.
+    await store.update('agentConfig', current.id, { settings, version: current.version + 1 });
+  } else {
+    const own = await store.create('agentConfig', {
+      id: newConfigId(),
+      orgId: agent.orgId,
+      name: copyName,
+      isDefault: false,
+      settings,
+    });
+    await store.update('agent', agent.id, { configId: own.id });
+  }
+  if ((agent.kind || 'server') !== settings.hostKind) await store.update('agent', agent.id, { kind: settings.hostKind });
 }
 
 /** Chart data for one server. Raw samples for 1h; 5-minute and 1-hour continuous aggregates beyond. */

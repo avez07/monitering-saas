@@ -41,7 +41,12 @@ function Problem({ event }) {
   );
 }
 
-export default function StepWait({ startedAt, doctorCommand = 'sudo yuktiops-agent doctor' }) {
+export default function StepWait({
+  startedAt,
+  doctorCommand = 'sudo yuktiops-agent doctor',
+  onServer,
+  done,
+}) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const id = setTimeout(() => setSlow(true), 60000);
@@ -55,6 +60,10 @@ export default function StepWait({ startedAt, doctorCommand = 'sudo yuktiops-age
     retry: true,
   });
   const serverId = pending.data?.serverId;
+  useEffect(() => {
+    if (serverId && onServer) onServer(serverId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId]);
   const connection = useQuery({
     queryKey: [session.org, 'add-server', 'connection', serverId],
     queryFn: () => getConnection(serverId),
@@ -79,6 +88,7 @@ export default function StepWait({ startedAt, doctorCommand = 'sudo yuktiops-age
       : [];
   const diagnosis = info?.diagnosis;
 
+  if (connected && done) return <div role="status">{done(connection.data, serverId)}</div>;
   if (connected)
     return (
       <div className="space-y-6" role="status">

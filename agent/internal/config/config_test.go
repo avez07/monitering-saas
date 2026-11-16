@@ -199,3 +199,38 @@ func TestLoadEnvironmentFile(t *testing.T) {
 		t.Errorf("only proxy variables may be imported, LD_PRELOAD = %q", got)
 	}
 }
+
+func TestHostRoot(t *testing.T) {
+	for in, want := range map[string]string{"": "", "/": "", "relative": "", " /host/ ": "/host", "/host": "/host", "/a//b/": "/a/b"} {
+		if got := CleanHostRoot(in); got != want {
+			t.Errorf("CleanHostRoot(%q) = %q, want %q", in, got, want)
+		}
+	}
+	t.Setenv(EnvHostRoot, "/host")
+	if HostRoot() != "/host" {
+		t.Errorf("HostRoot() = %q", HostRoot())
+	}
+	if got := HostPath("/host", "/etc/machine-id"); got != filepath.Join("/host", "etc", "machine-id") {
+		t.Errorf("HostPath = %q", got)
+	}
+	if got := HostPath("", "/etc/machine-id"); got != "/etc/machine-id" {
+		t.Errorf("without a host root the path must not change, got %q", got)
+	}
+	if got := machineIDSourcesUnder(""); got[0] != "/etc/machine-id" || got[1] != "/var/lib/dbus/machine-id" {
+		t.Errorf("default sources changed: %v", got)
+	}
+	if got := machineIDSourcesUnder("/host"); got[0] != filepath.Join("/host", "etc", "machine-id") {
+		t.Errorf("host sources wrong: %v", got)
+	}
+}
+
+func TestFingerprintUsesHostMachineID(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+	os.WriteFile(filepath.Join(root, "etc", "machine-id"), []byte("abc\n"), 0o644)
+	t.Setenv(EnvHostRoot, root)
+	got, err := Fingerprint(filepath.Join(t.TempDir(), "fallback"))
+	if err != nil || got != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Errorf("fingerprint = %q, %v", got, err)
+	}
+}

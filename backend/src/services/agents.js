@@ -53,7 +53,7 @@ async function registerOnce(tx, key, input) {
     version: input.version,
     status: 'pending',
     lastSeen: new Date(),
-    ...(setup ? { configId: setup.id } : {}),
+    ...(setup ? { configId: setup.id, kind: setup.settings?.hostKind || 'server' } : {}),
   };
   let agent = await tx.find('agent', { orgId, fingerprint: input.fingerprint });
   let reconnected = false;

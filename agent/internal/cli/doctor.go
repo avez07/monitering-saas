@@ -70,14 +70,26 @@ type Doctor struct {
 	Service    func() ServiceState
 	LookupHost func(ctx context.Context, host string) ([]string, error)
 	DialTCP    func(ctx context.Context, address string) error
+
+	// InContainer tells whether the agent runs inside a container; HostRoot is the HOST_ROOT value
+	// and DirExists tests that a directory exists (both replaced in tests).
+	InContainer func() bool
+	HostRoot    string
+	DirExists   func(path string) bool
 }
 
 // NewDoctor returns a Doctor wired to the real system.
 func NewDoctor(paths config.Paths, version string) *Doctor {
 	return &Doctor{
-		Paths:   paths,
-		Version: version,
-		Now:     time.Now,
+		Paths:       paths,
+		Version:     version,
+		Now:         time.Now,
+		InContainer: inContainer,
+		HostRoot:    config.HostRoot(),
+		DirExists: func(p string) bool {
+			st, err := os.Stat(p)
+			return err == nil && st.IsDir()
+		},
 		Service: func() ServiceState { return systemdState(config.ServiceName) },
 		LookupHost: func(ctx context.Context, host string) ([]string, error) {
 			return net.DefaultResolver.LookupHost(ctx, host)
@@ -104,6 +116,9 @@ func (d *Doctor) Run(ctx context.Context) []Result {
 	cfg, settings := d.checkSettings()
 	add(settings)
 	add(d.checkFiles()...)
+	if r, show := d.checkContainer(); show {
+		add(r)
+	}
 
 	cl, err := client.New(cfg.APIURL, cfg.Proxy, d.Version)
 	if err != nil {
@@ -149,6 +164,33 @@ func (d *Doctor) checkSettings() (config.File, Result) {
 	}
 	return fallback, Result{Name: name, Status: StatusFail, Code: CodeConfigInvalid, Detail: loadErr.Error(),
 		Fix: "Correct " + d.Paths.ConfigFile() + " (or delete it) and register again: sudo yuktiops-agent register --key=<your API key>"}
+}
+
+// checkContainer warns when the agent runs in a container that cannot see the host. It returns
+// false (show nothing) on a normal machine.
+func (d *Doctor) checkContainer() (Result, bool) {
+	const name = "Container"
+	if d.InContainer == nil || !d.InContainer() {
+		return Result{}, false
+	}
+	const fix = "Start the container with the host mounts: docker run -d --pid host --network host " +
+		"-v /:/host:ro -e HOST_ROOT=/host (plus -v /var/run/docker.sock:/var/run/docker.sock:ro to see containers). " +
+		"On Windows or Mac with Docker Desktop the agent can only monitor Docker's Linux VM, not your computer."
+	if d.HostRoot == "" {
+		return Result{Name: name, Status: StatusWarn,
+			Detail: "running in a container without host mounts: you will only see the container, not the machine it runs on",
+			Fix:    fix}, true
+	}
+	exists := d.DirExists
+	if exists == nil {
+		exists = func(string) bool { return false }
+	}
+	if !exists(config.HostPath(d.HostRoot, "/proc")) {
+		return Result{Name: name, Status: StatusWarn,
+			Detail: "HOST_ROOT is " + d.HostRoot + " but the host's files are not mounted there: you will only see the container",
+			Fix:    fix}, true
+	}
+	return ok(name, "running in a container; reading the host through "+d.HostRoot), true
 }
 
 func (d *Doctor) checkDNS(ctx context.Context, cl *client.Client, proxy *url.URL) Result {

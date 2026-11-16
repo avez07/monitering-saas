@@ -116,38 +116,78 @@ export function oneCommand({ release, key, setupId, docker, apiUrl }) {
   return docker ? `${command} --docker` : command;
 }
 
-export function dockerRun({ release, key, apiUrl, docker }) {
-  const image = release?.docker
-    ? `${release.docker.image}:${release.docker.tag}`
-    : 'ghcr.io/yuktiops/agent:latest';
-  const local = apiUrl && /localhost|127\.0\.0\.1/.test(apiUrl);
-  const k = key || 'YOUR_API_KEY';
-  return [
-    'docker run -d --name yuktiops-agent --restart unless-stopped \\',
-    `  -e YUKTIOPS_API_KEY=${k} \\`,
-    ...(local ? [`  -e YUKTIOPS_API_URL=${apiUrl} \\`] : []),
-    '  -v yuktiops-agent:/var/lib/yuktiops \\',
-    ...(docker ? ['  -v /var/run/docker.sock:/var/run/docker.sock:ro \\'] : []),
-    `  ${image}`,
-  ].join('\n');
+/** Where Docker runs. Linux is recommended; Docker Desktop runs everything inside a Linux VM. */
+export const DOCKER_PLATFORMS = [
+  {
+    id: 'linux',
+    label: 'Linux server (recommended)',
+    hint: 'Docker Engine on a Linux machine. The agent sees the whole machine.',
+  },
+  {
+    id: 'windows',
+    label: 'Windows (Docker Desktop)',
+    hint: 'Run the command in PowerShell, or in Git Bash.',
+  },
+  { id: 'mac', label: 'macOS (Docker Desktop)', hint: 'Run the command in Terminal.' },
+];
+export const WINDOWS_SHELLS = [
+  { id: 'powershell', label: 'PowerShell' },
+  { id: 'gitbash', label: 'Git Bash' },
+];
+export const DOCKER_DESKTOP_NOTE =
+  "On Docker Desktop the agent monitors Docker's Linux virtual machine and your containers, not your Windows or Mac computer itself.";
+
+const isLocalApi = (apiUrl) => !!apiUrl && /localhost|127\.0\.0\.1/.test(apiUrl);
+const imageOf = (release) =>
+  release?.docker ? `${release.docker.image}:${release.docker.tag}` : 'ghcr.io/yuktiops/agent:latest';
+
+/**
+ * `docker run` for the agent. `platform`: linux | windows | mac. For windows, `shell` is
+ * powershell (backtick line breaks) or gitbash (MSYS_NO_PATHCONV=1 so Git Bash leaves
+ * /var/run/docker.sock alone instead of turning it into C:\Program Files\Gitar\...).
+ */
+export function dockerRun({
+  release,
+  key,
+  apiUrl,
+  docker,
+  platform = 'linux',
+  shell = 'powershell',
+}) {
+  const ps = platform === 'windows' && shell === 'powershell';
+  const cont = ps ? ' `' : ' \\';
+  const lines = [
+    'docker run -d --name yuktiops-agent --restart unless-stopped',
+    '--pid host --network host',
+    '-v /:/host:ro -e HOST_ROOT=/host',
+    `-e YUKTIOPS_API_KEY=${key || 'YOUR_API_KEY'}`,
+    ...(isLocalApi(apiUrl) ? [`-e YUKTIOPS_API_URL=${apiUrl}`] : []),
+    '-v yuktiops-agent:/var/lib/yuktiops',
+    ...(docker ? ['-v /var/run/docker.sock:/var/run/docker.sock:ro'] : []),
+    imageOf(release),
+  ];
+  const body = lines.map((l, i) => (i === 0 ? l : `  ${l}`));
+  const joined = body.map((l, i) => (i < body.length - 1 ? l + cont : l)).join('\n');
+  return platform === 'windows' && shell === 'gitbash' ? `MSYS_NO_PATHCONV=1 ${joined}` : joined;
 }
 
+/** The same mounts as docker run, as a compose file. Compose is not shell-specific. */
 export function dockerCompose({ release, key, apiUrl, docker }) {
-  const image = release?.docker
-    ? `${release.docker.image}:${release.docker.tag}`
-    : 'ghcr.io/yuktiops/agent:latest';
-  const local = apiUrl && /localhost|127\.0\.0\.1/.test(apiUrl);
   return [
     'services:',
     '  yuktiops-agent:',
-    `    image: ${image}`,
+    `    image: ${imageOf(release)}`,
     '    container_name: yuktiops-agent',
     '    restart: unless-stopped',
+    '    pid: host',
+    '    network_mode: host',
     '    environment:',
     `      YUKTIOPS_API_KEY: ${key || 'YOUR_API_KEY'}`,
-    ...(local ? [`      YUKTIOPS_API_URL: ${apiUrl}`] : []),
+    '      HOST_ROOT: /host',
+    ...(isLocalApi(apiUrl) ? [`      YUKTIOPS_API_URL: ${apiUrl}`] : []),
     '    volumes:',
     '      - yuktiops-agent:/var/lib/yuktiops',
+    '      - /:/host:ro',
     ...(docker ? ['      - /var/run/docker.sock:/var/run/docker.sock:ro'] : []),
     'volumes:',
     '  yuktiops-agent:',
@@ -158,9 +198,23 @@ export function dockerCompose({ release, key, apiUrl, docker }) {
 /** agent.yaml for the Download tab (the file `register` would write). */
 export function agentYaml({ apiUrl, setupId }) {
   return [
-    '# YuktiOps agent settings. Put this at /etc/yuktiops/agent.yaml',
+    '# YuktiOps agent settings.',
+    '# Save this file as /etc/yuktiops/agent.yaml, then restart the agent:',
+    '#   sudo systemctl restart yuktiops-agent',
+    '#',
+    '# Where the agent sends its data. Leave this as it is unless we told you otherwise.',
     `api_url: "${apiUrl || 'https://api.yuktiops.com'}"`,
-    ...(setupId ? [`setup_id: "${setupId}"`] : []),
+    ...(setupId
+      ? [
+          '',
+          '# Which setup profile (what to measure and how often) this server uses.',
+          '# You can change the profile later in the dashboard, no need to edit this file.',
+          `setup_id: "${setupId}"`,
+        ]
+      : []),
+    '',
+    '# Your API key is NOT stored here. Run "sudo yuktiops-agent register --key=YOUR_API_KEY"',
+    '# once and the agent keeps a private credential in /var/lib/yuktiops.',
     '',
   ].join('\n');
 }

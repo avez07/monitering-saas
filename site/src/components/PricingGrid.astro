@@ -2,22 +2,25 @@
 import { PLANS, REGISTER_URL } from '../site.js';
 const rows = [['Servers', 'servers'], ['Website and API checks', 'checks'], ['History kept', 'history'], ['Where alerts go', 'contacts'], ['Team members', 'team']];
 ---
-<div class="flex justify-center" role="group" aria-label="Currency">
-  <div class="inline-flex rounded-md border p-1">
-    <button type="button" data-currency-btn="INR" aria-pressed="true" class="rounded px-4 py-1.5 text-sm font-medium aria-pressed:bg-primary aria-pressed:text-primary-foreground">INR (₹)</button>
-    <button type="button" data-currency-btn="USD" aria-pressed="false" class="rounded px-4 py-1.5 text-sm font-medium aria-pressed:bg-primary aria-pressed:text-primary-foreground">USD ($)</button>
-  </div>
+<div class="flex flex-col items-center gap-2" data-pricing>
+  <p class="text-sm text-muted-foreground" data-currency="INR">Prices in Indian rupees (₹)</p>
+  <p class="text-sm text-muted-foreground" data-currency="USD" hidden>Prices in US dollars ($)</p>
+  <button type="button" data-currency-toggle aria-pressed="false" class="text-sm font-medium underline underline-offset-4">
+    <span data-currency="INR">Pay in USD instead</span>
+    <span data-currency="USD" hidden>Pay in INR (₹) instead</span>
+  </button>
 </div>
 <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
   {PLANS.map((p) => (
     <div class:list={['card flex flex-col p-6', p.featured && 'ring-2 ring-ring']}>
       <h2 class="text-lg font-semibold">{p.name}{p.featured && <span class="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">Popular</span>}</h2>
       <p class="mt-1 text-sm text-muted-foreground">{p.blurb}</p>
-      <p class="mt-4 flex items-baseline gap-1">
+      <p class="mt-4 flex flex-wrap items-baseline gap-1">
         <span data-currency="INR" class="text-4xl font-bold">{p.inr}</span>
         <span data-currency="USD" hidden class="text-4xl font-bold">{p.usd}</span>
         <span class="text-sm text-muted-foreground">/ month</span>
       </p>
+      {p.id !== 'free' && <p data-currency="INR" class="mt-1 text-xs text-muted-foreground">+ 18% GST</p>}
       <ul class="mt-5 flex-1 space-y-2 text-sm">
         {rows.map(([label, key]) => <li class="flex justify-between gap-3 border-b pb-2"><span class="text-muted-foreground">{label}</span><span class="text-right font-medium">{p[key]}</span></li>)}
       </ul>
@@ -25,4 +28,20 @@ const rows = [['Servers', 'servers'], ['Website and API checks', 'checks'], ['Hi
     </div>
   ))}
 </div>
-<p class="mt-6 text-center text-sm text-muted-foreground">Prices are per month, per account. Taxes such as GST may be added at checkout. Paid plans are not yet charged during the free beta.</p>
+<p class="mt-6 text-center text-sm text-muted-foreground">
+  <span data-currency="INR">Prices are per month, per account, in rupees, plus 18% GST. Paid by UPI, card or netbanking through Razorpay.</span>
+  <span data-currency="USD" hidden>Prices are per month, per account, in US dollars. Paid by card through Stripe.</span>
+  Paid plans are not yet charged during the free beta.
+</p>
+<script>
+  const root = document.querySelector('[data-pricing]');
+  const btn = root?.querySelector('[data-currency-toggle]');
+  function show(cur) {
+    document.querySelectorAll('[data-currency]').forEach((el) => {
+      (el as HTMLElement).hidden = el.getAttribute('data-currency') !== cur;
+    });
+    btn?.setAttribute('aria-pressed', String(cur === 'USD'));
+  }
+  let cur = 'INR';
+  btn?.addEventListener('click', () => { cur = cur === 'INR' ? 'USD' : 'INR'; show(cur); });
+</script>

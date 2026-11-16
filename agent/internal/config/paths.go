@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -23,6 +24,9 @@ const (
 	EnvAPIURL    = "YUKTIOPS_API_URL"
 	EnvAPIKey    = "YUKTIOPS_API_KEY"
 	EnvName      = "YUKTIOPS_NAME"
+	// EnvHostRoot is where the host's root filesystem is mounted inside a container (for example
+	// /host). Empty means the agent runs directly on the machine it reports.
+	EnvHostRoot = "HOST_ROOT"
 )
 
 // Paths says where the agent keeps its files. Both directories can be overridden (flag, then
@@ -71,4 +75,29 @@ func (p Paths) ConfigFiles() []string {
 
 func (p Paths) StateFiles() []string {
 	return []string{p.StateFile(), p.BufferFile(), p.RemoteConfigFile()}
+}
+
+// HostRoot returns the cleaned HOST_ROOT value, or "" when it is unset or means "/".
+func HostRoot() string { return CleanHostRoot(os.Getenv(EnvHostRoot)) }
+
+// CleanHostRoot normalises a HOST_ROOT value. "", "/" and relative paths all mean "no host root".
+func CleanHostRoot(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || !filepath.IsAbs(v) {
+		return ""
+	}
+	v = filepath.Clean(v)
+	if v == "/" || v == "." {
+		return ""
+	}
+	return v
+}
+
+// HostPath puts a path of the host (such as /etc/machine-id) under root. With an empty root the
+// path is returned unchanged, so behaviour without HOST_ROOT is identical.
+func HostPath(root, path string) string {
+	if root == "" {
+		return path
+	}
+	return filepath.Join(root, path)
 }

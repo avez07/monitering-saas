@@ -34,7 +34,7 @@ Phases 0–15 are built, but two gaps remain:
 
 ---
 
-## Part C — Fixes from your testing (Phase 16, do first; small)
+## Part C — Fixes from your testing (Phase 16) ✅ done (see status note at the end)
 
 ### C.1 Docker install fails on Windows (`mkdir C:\Program Files\Git\var: Access is denied`)
 
@@ -275,7 +275,7 @@ Inventory (found in code/UI/docs):
 
 | Phase | What | Depends on | Done when |
 |---|---|---|---|
-| **16 — Fixes from testing** | All of Part C: Windows Docker command fix and host-mount agent image, Containers without a server ("Docker host"), "Add a service" on the Services page, INR-default billing, step-by-step setup guide | — | each C.x done-when; existing e2e green |
+| ✅ **16 — Fixes from testing** | All of Part C: Windows Docker command fix and host-mount agent image, Containers without a server ("Docker host"), "Add a service" on the Services page, INR-default billing, step-by-step setup guide | — | each C.x done-when; existing e2e green |
 | **17 — Scale-out** | All of Part A (Redis, BullMQ, PgBouncer, stateless API ×N, workers by role) | 16 | Part A load targets met; all existing tests green |
 | **18 — OpenTelemetry for customers** | All of Part D (OTLP ingest, ClickHouse, Apps section, traces/logs explorers, setup page) | 17 | D.4 |
 | **19 — Account gaps and copy** | • Fix stale site/docs copy<br>• **Account:** change name (`PATCH /api/auth/me`), change password in place (current + new; revokes other sessions), transfer ownership (owner → existing admin, email confirmation), delete organization (owner, type-name confirm, 7-day soft delete then purge job on `housekeeping`)<br>• Remove the unused `ComingSoon` component | — | e2e covers each action; docs/team-roles.md matches |
@@ -361,3 +361,9 @@ Inventory (found in code/UI/docs):
 - **Server log tail reuses the OTel logs store** instead of a separate live-only stream.
 - **Docker hosts count against the plan's server limit** (no new price).
 - Windows comes before macOS, because servers matter more than laptops for this audience.
+
+## Status
+
+- ✅ **Phase 16** built and tested (backend 156 tests, frontend 8, agent go vet/test, site build, e2e 22/22).
+  - Not yet done from C.5: dashboard screenshots in the docs, scripted fresh-Ubuntu / Docker Desktop install e2e, Docker e2e proving `/:/host:ro` reports host totals, and running the new Docker snippets on a real Windows machine.
+  - Site docs contain example output that should be checked against the real agent.

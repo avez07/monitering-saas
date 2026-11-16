@@ -162,6 +162,7 @@ export function containerToApi(c, server) {
     id: c.id,
     serverId: c.agentId,
     serverName: server?.name ?? null,
+    serverKind: server?.kind ?? 'server',
     name: c.name,
     image: c.image,
     state: c.state,
@@ -181,7 +182,7 @@ export const eventToApi = (e) => ({ id: e.id, type: e.type, message: e.message, 
 /** Map of agent id to { name } for the org's live (not removed) servers. */
 export async function serverNames(store, orgId) {
   const live = await liveServers(store, orgId);
-  return new Map(live.map(({ agent, resource }) => [agent.id, { name: resource.name, hostname: agent.name }]));
+  return new Map(live.map(({ agent, resource }) => [agent.id, { name: resource.name, hostname: agent.name, kind: agent.kind || 'server' }]));
 }
 
 export async function listContainers(store, orgId, { serverId, state, search } = {}) {

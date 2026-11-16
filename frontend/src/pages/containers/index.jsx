@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, Search } from 'lucide-react';
+import { Box, Plus, Search } from 'lucide-react';
 import {
   DataTable,
   EmptyState,
@@ -10,7 +10,9 @@ import {
   StatusBadge,
   TableSkeleton,
 } from '@/components/app';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import MonitorDockerDialog from './MonitorDockerDialog';
 import { useApi } from '@/lib/hooks';
 import { formatBytes, formatPercent } from '@/lib/format';
 
@@ -27,15 +29,6 @@ const STATE = {
 const ORDER = { unhealthy: 0, warning: 1, unknown: 2, healthy: 3 };
 const stateOf = (c) => STATE[c.state] || { status: 'unknown', label: 'Unknown' };
 
-const noData = (
-  <EmptyState
-    icon={Box}
-    title="No Docker data yet"
-    text="Turn on Containers in your server settings and the containers running on that server show up here."
-    action={{ label: 'Open your servers', to: '/servers' }}
-  />
-);
-
 export default function Containers() {
   const { data, isLoading, error, refetch } = useApi(
     '/containers',
@@ -46,6 +39,15 @@ export default function Containers() {
     },
   );
   const [search, setSearch] = useState('');
+  const [dialog, setDialog] = useState(false);
+  const noData = (
+    <EmptyState
+      icon={Box}
+      title="No Docker data yet"
+      text="Add a Docker host and the containers running on it show up here. You do not need to add a server first."
+      action={{ label: 'Monitor Docker containers', onClick: () => setDialog(true) }}
+    />
+  );
   const missing = error?.status === 404;
   const rows = useMemo(() => {
     const list = Array.isArray(data) ? data : (data?.items ?? []);
@@ -56,6 +58,7 @@ export default function Containers() {
       )
       .sort(
         (a, b) =>
+          (b.serverKind === 'docker-host') - (a.serverKind === 'docker-host') ||
           ORDER[stateOf(a).status] - ORDER[stateOf(b).status] || a.name.localeCompare(b.name),
       );
   }, [data, search]);
@@ -65,8 +68,14 @@ export default function Containers() {
     <>
       <PageHeader
         title="Containers"
-        description="Docker containers running on your servers. Stopped ones are shown first."
+        description="Docker containers running on your Docker hosts and servers. Stopped ones are shown first."
+        actions={
+          <Button onClick={() => setDialog(true)}>
+            <Plus className="size-4" aria-hidden="true" /> Monitor Docker containers
+          </Button>
+        }
       />
+      <MonitorDockerDialog open={dialog} onOpenChange={setDialog} />
       {isLoading ? (
         <TableSkeleton />
       ) : missing || (!error && total === 0) ? (
@@ -83,7 +92,7 @@ export default function Containers() {
             <Input
               type="search"
               aria-label="Search containers"
-              placeholder="Search by name, image or server"
+              placeholder="Search by name, image or Docker host"
               className="pl-9"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -132,14 +141,14 @@ export default function Containers() {
               },
               {
                 key: 'serverName',
-                header: 'Server',
+                header: 'Docker host',
                 cell: (c) =>
                   c.serverId ? (
                     <Link
                       to={`/servers/${c.serverId}`}
                       className="underline-offset-4 hover:underline"
                     >
-                      {c.serverName || 'Server'}
+                      {c.serverName || 'Docker host'}
                     </Link>
                   ) : (
                     c.serverName || '-'

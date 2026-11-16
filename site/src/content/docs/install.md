@@ -5,9 +5,17 @@ group: Start here
 order: 2
 ---
 
-The agent is one small program with no dependencies. It runs in the background as its own user, `yuktiops`, and starts again after every reboot. Supported: Linux on x86-64 (amd64), ARM64 and ARMv7 (older Raspberry Pi). Windows and macOS are not available yet.
+The agent is one small program with no dependencies. It runs in the background as its own user, `yuktiops`, and starts again after every reboot. Supported: Linux on x86-64 (amd64), ARM64 and ARMv7 (older Raspberry Pi). Native Windows and macOS agents are not available yet, but Docker Desktop on both works (it monitors Docker's Linux VM, not the PC).
 
-The dashboard's **Add server** page creates the exact commands for you. This page explains each option.
+The dashboard's **Add server** page creates the exact commands for you. This page is a summary; each method has a full step-by-step page:
+
+- [One command](/docs/install-one-command)
+- [.deb package](/docs/install-deb)
+- [.rpm package](/docs/install-rpm)
+- [Tarball](/docs/install-tarball)
+- [Docker on Linux](/docs/install-docker-linux)
+- [Docker Desktop on Windows](/docs/install-docker-windows)
+- [Docker Desktop on macOS](/docs/install-docker-mac)
 
 ## One command (any Linux with systemd)
 
@@ -54,12 +62,13 @@ Use the one-command install, or unpack the `.tar.gz` yourself, put `yuktiops-age
 
 ```
 docker run -d --name yuktiops-agent --restart unless-stopped \
+  --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
   -e YUKTIOPS_API_KEY=yk_live_... \
   -v yuktiops-agent:/var/lib/yuktiops \
   ghcr.io/yuktiops/agent
 ```
 
-The container registers itself the first time it starts. It reports the container's own view of the system, so use the normal install if you want the host's numbers.
+The container registers itself the first time it starts, and the options above let it report the host's numbers. Add `-v /var/run/docker.sock:/var/run/docker.sock:ro` for container monitoring. Full steps: [Docker on Linux](/docs/install-docker-linux).
 
 ## Docker container monitoring (optional)
 

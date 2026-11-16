@@ -1,4 +1,21 @@
 # Image built by GoReleaser: the binary is copied from the build context. Multi-arch (amd64, arm64, armv7).
+#
+# A container only sees itself. To monitor the machine Docker runs on, give it the host:
+#   --pid host              see the host's processes
+#   --network host          see the host's network traffic
+#   -v /:/host:ro           the host's files and disks, read-only
+#   -e HOST_ROOT=/host      tell the agent to read /proc, /sys, /etc and disks under /host
+#   -v /var/run/docker.sock:/var/run/docker.sock:ro   only if you turn on the Containers collector
+#   -v yuktiops-agent:/var/lib/yuktiops               keeps the credential across restarts
+#
+#   docker run -d --name yuktiops-agent --restart unless-stopped \
+#     --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
+#     -v /var/run/docker.sock:/var/run/docker.sock:ro \
+#     -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops \
+#     ghcr.io/yuktiops/agent
+#
+# Without HOST_ROOT the agent reports the container, and `yuktiops-agent doctor` says so.
+# On Docker Desktop (Windows, Mac) "the host" is Docker's own Linux VM, not your computer.
 FROM busybox:1.37 AS prepare
 RUN mkdir -p /out/var/lib/yuktiops && chown -R 65532:65532 /out/var/lib/yuktiops
 

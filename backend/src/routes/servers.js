@@ -16,7 +16,8 @@ export function serverRoutes(store) {
   const router = Router();
 
   router.get('/servers', async (req, res) => {
-    res.json(await listServers(store, req.context.orgId));
+    const q = z.object({ includeDockerHosts: z.enum(['true', 'false']).optional() }).parse(req.query);
+    res.json(await listServers(store, req.context.orgId, { includeDockerHosts: q.includeDockerHosts === 'true' }));
   });
   router.get('/servers/:id', async (req, res) => {
     const { agent, resource } = await requireServer(store, req.context.orgId, req.params.id);

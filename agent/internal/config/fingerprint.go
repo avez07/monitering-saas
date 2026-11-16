@@ -17,8 +17,19 @@ var machineIDSources = []string{"/etc/machine-id", "/var/lib/dbus/machine-id"}
 //
 // Machines without /etc/machine-id (some containers and minimal images) get a random id that is
 // generated once and kept in fallbackFile, next to the credential.
+//
+// With HOST_ROOT set (a container that mounts the host's / there) the host's machine-id is used,
+// so the container is the same server as the host.
 func Fingerprint(fallbackFile string) (string, error) {
-	return fingerprintFrom(machineIDSources, fallbackFile)
+	return fingerprintFrom(machineIDSourcesUnder(HostRoot()), fallbackFile)
+}
+
+func machineIDSourcesUnder(root string) []string {
+	out := make([]string, len(machineIDSources))
+	for i, s := range machineIDSources {
+		out[i] = HostPath(root, s)
+	}
+	return out
 }
 
 func fingerprintFrom(sources []string, fallbackFile string) (string, error) {

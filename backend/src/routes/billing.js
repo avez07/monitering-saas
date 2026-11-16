@@ -56,6 +56,7 @@ export function billingRoutes(store) {
         razorpay: { configured: providers.razorpay.configured, currency: 'INR' },
         stripe: { configured: providers.stripe.configured, currency: 'USD' },
       },
+      defaultCurrency: 'INR',
       devMode: config.BILLING_DEV_MODE,
       gst: { rate: GST_RATE },
       graceDays: GRACE_DAYS,
@@ -83,7 +84,7 @@ export function billingRoutes(store) {
       .object({
         planId: z.string().min(1).max(100),
         interval: z.enum(['monthly', 'annual']).default('monthly'),
-        currency: z.enum(['USD', 'INR']).default('USD'),
+        currency: z.enum(['USD', 'INR']).default('INR'),
       })
       .parse(req.body);
     const { orgId, user } = req.context;
@@ -200,7 +201,11 @@ export function billingRoutes(store) {
       'Plan changes go through checkout. Use the Upgrade button on the Plan & billing page.',
     );
     const input = z
-      .object({ planId: z.string().min(1).max(100), interval: z.enum(['monthly', 'annual']) })
+      .object({
+        planId: z.string().min(1).max(100),
+        interval: z.enum(['monthly', 'annual']),
+        currency: z.enum(['USD', 'INR']).default('INR'),
+      })
       .parse(req.body);
     const plan = await store.find('subscriptionPlan', { id: input.planId });
     assert(plan, 404, 'Plan not found.');
@@ -210,6 +215,7 @@ export function billingRoutes(store) {
       req.context.orgId,
       plan,
       input.interval,
+      input.currency,
     );
     await audit(store, req.context, 'subscription.changed', plan.name, { provider: 'mock' });
     res.json({ invoice, message: 'Plan updated. No money was charged (development mode).' });

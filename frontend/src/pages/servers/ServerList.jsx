@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { useServers } from './api';
 import { bySeverity, serverReason, serverStatus, statusLabel } from './status';
 
@@ -30,6 +31,9 @@ function ServerCard({ server }) {
               >
                 {server.name}
               </Link>
+              {server.kind === 'docker-host' && (
+                <span className="ml-2 text-xs font-normal text-muted-foreground">Docker host</span>
+              )}
             </h2>
             <p className="truncate text-sm text-muted-foreground">
               {[server.os, server.agentVersion && `Agent ${server.agentVersion}`]
@@ -54,7 +58,8 @@ function ServerCard({ server }) {
 }
 
 export default function ServerList() {
-  const { servers, isLoading, error, refetch } = useServers();
+  const [showDocker, setShowDocker] = useState(false);
+  const { servers, isLoading, error, refetch } = useServers({ includeDockerHosts: showDocker });
   const [search, setSearch] = useState('');
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -69,11 +74,23 @@ export default function ServerList() {
         title="Servers"
         description="Every server you monitor, with the ones that need you shown first."
         actions={
-          <Button asChild>
-            <Link to="/add-server">
-              <Plus className="size-4" aria-hidden="true" /> Add server
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-docker-hosts"
+                checked={showDocker}
+                onCheckedChange={setShowDocker}
+              />
+              <label htmlFor="show-docker-hosts" className="text-sm">
+                Show Docker hosts
+              </label>
+            </div>
+            <Button asChild>
+              <Link to="/add-server">
+                <Plus className="size-4" aria-hidden="true" /> Add server
+              </Link>
+            </Button>
+          </div>
         }
       />
       {isLoading ? (

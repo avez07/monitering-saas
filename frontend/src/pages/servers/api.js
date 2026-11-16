@@ -9,8 +9,12 @@ export const RANGES = [
 ];
 
 /** Servers list. Refreshes every 30 s. `servers` is always an array. */
-export function useServers() {
-  const query = useApi('/servers', {}, { refetchInterval: 30000 });
+export function useServers({ includeDockerHosts = false } = {}) {
+  const query = useApi(
+    '/servers',
+    includeDockerHosts ? { includeDockerHosts: 'true' } : {},
+    { refetchInterval: 30000 },
+  );
   const data = query.data;
   return { ...query, servers: Array.isArray(data) ? data : (data?.items ?? []) };
 }

@@ -22,7 +22,7 @@ Go to **Alerts** and choose a template. You can change any number afterwards.
 - Container stopped
 - Service stopped
 
-New accounts start with three alerts already on: server down, disk almost full, and website down (it applies once you add a website). Container and service alerts need those features, which are coming later.
+New accounts start with three alerts already on: server down, disk almost full, and website down (it applies once you add a website). Container and service alerts work once you turn on container or service monitoring for a server (see [Install the agent](/docs/install)).
 
 ## Where alerts are sent
 

@@ -10,7 +10,7 @@ const DAY = 86400000;
 /** Dev-only provider behind /api/billing/change (BILLING_DEV_MODE). It never charges anything. */
 export const billingProvider = {
   name: 'mock',
-  async changeSubscription(store, orgId, plan, interval) {
+  async changeSubscription(store, orgId, plan, interval, currency = 'INR') {
     const subscription = await store.find('subscription', { orgId });
     const periodEnd = new Date(Date.now() + (interval === 'annual' ? 365 : 30) * DAY);
     await store.update('subscription', subscription.id, {
@@ -21,15 +21,21 @@ export const billingProvider = {
       cancelAtPeriodEnd: false,
       pastDueSince: null,
     });
+    const mult = interval === 'annual' ? 10 : 1;
+    const base = { orgId, number: `MOCK-${Date.now()}`, status: 'simulated', provider: 'mock', periodStart: new Date(), periodEnd };
+    if (currency === 'USD') return store.create('invoice', { ...base, amount: plan.priceUsdCents * mult, currency: 'USD' });
+    // INR is the default: 18% GST on top, split into CGST+SGST or IGST by the customer's state.
+    const profile = await store.find('billingProfile', { orgId });
+    const gst = computeGst(plan.priceInrPaise * mult, profile || {});
     return store.create('invoice', {
-      orgId,
-      number: `MOCK-${Date.now()}`,
-      amount: plan.priceUsdCents * (interval === 'annual' ? 10 : 1),
-      currency: 'USD',
-      status: 'simulated',
-      provider: 'mock',
-      periodStart: new Date(),
-      periodEnd,
+      ...base,
+      amount: gst.total,
+      currency: 'INR',
+      subtotal: gst.subtotal,
+      tax: gst.tax,
+      taxRate: gst.rate,
+      taxBreakdown: gst.breakdown,
+      customerGstin: profile?.gstin || null,
     });
   },
 };

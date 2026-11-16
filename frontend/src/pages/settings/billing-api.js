@@ -15,6 +15,6 @@ export const openPortal = () => api('/billing/portal', { method: 'POST' });
  *   { switched }             immediate switch to Free
  * Errors: 503 payments not set up, 400 over the new plan's limits, 409 other provider active.
  */
-export function startCheckout(planId, { interval = 'monthly', currency = 'USD' } = {}) {
+export function startCheckout(planId, { interval = 'monthly', currency = 'INR' } = {}) {
   return api('/billing/checkout', { method: 'POST', body: { planId, interval, currency } });
 }

@@ -68,7 +68,7 @@ export const routes = [
           { path: '/', element: <Overview /> },
           { path: '/servers/*', element: <Servers /> },
           { path: '/containers', element: <Containers /> },
-          { path: '/services', element: <Services /> },
+          { path: '/services/*', element: <Services /> },
           { path: '/websites/*', element: <Websites /> },
           { path: '/alerts/*', element: <Alerts /> },
           { path: '/settings/*', element: <Settings /> },

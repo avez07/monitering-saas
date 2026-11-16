@@ -30,6 +30,7 @@ export const agentSettingsSchema = z
   .object({
     sendIntervalSeconds: z.number().int().min(15).max(300).default(30),
     sampleIntervalSeconds: z.number().int().min(5).max(60).default(10),
+    hostKind: z.enum(['server', 'docker-host']).default('server'),
     collectors: z
       .object({
         cpu: flag,

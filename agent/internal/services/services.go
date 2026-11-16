@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yuktiops/agent/internal/config"
 	"github.com/yuktiops/agent/internal/remote"
 )
 
@@ -53,7 +54,7 @@ type Checker struct {
 // New returns a checker for the running system.
 func New() *Checker {
 	return &Checker{
-		ProcRoot:  "/proc",
+		ProcRoot:  config.HostPath(config.HostRoot(), "/proc"),
 		Systemctl: runSystemctl,
 		HTTP: &http.Client{
 			Timeout: checkTimeout,

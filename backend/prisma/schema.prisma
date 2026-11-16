@@ -161,6 +161,8 @@ model Agent {
   os          String              @default("")
   arch        String              @default("")
   configId    String?
+  /// server | docker-host (from the setup profile's hostKind)
+  kind        String              @default("server")
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   project     Project             @relation(fields: [orgId, projectId], references: [orgId, id], onDelete: Cascade)
