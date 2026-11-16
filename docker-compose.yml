@@ -21,6 +21,21 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       retries: 15
+  # OpenTelemetry storage (traces + logs). Loopback only. Pinned (25.8 LTS line).
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.33.6-alpine
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-yuktiops}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-yuktiops_local_dummy}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    ports: ['127.0.0.1:8123:8123']
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes: ['yuktiops-clickhouse-data:/var/lib/clickhouse']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8123/ping | grep -q Ok']
+      interval: 5s
+      retries: 15
   # Optional transaction-mode PgBouncer (profile "pgbouncer"), to test the production connection path:
   #   docker compose --profile pgbouncer up -d pgbouncer
   #   DATABASE_URL=postgresql://USER:PASS@localhost:6432/DB?schema=public&pgbouncer=true&connection_limit=10
@@ -58,6 +73,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       SMTP_HOST: mailpit
       REDIS_URL: redis://redis:6379/0
+      CLICKHOUSE_URL: http://clickhouse:8123
     ports: ['127.0.0.1:${API_HOST_PORT:-4000}:4000']
     depends_on:
       postgres: { condition: service_healthy }
@@ -82,6 +98,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       SMTP_HOST: mailpit
       REDIS_URL: redis://redis:6379/0
+      CLICKHOUSE_URL: http://clickhouse:8123
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -90,3 +107,4 @@ services:
 volumes:
   yuktiops-postgres-data:
   yuktiops-redis-data:
+  yuktiops-clickhouse-data:

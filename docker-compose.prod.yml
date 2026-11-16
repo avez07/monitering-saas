@@ -28,6 +28,10 @@ x-app-env: &app-env
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-30000}
   REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: ${CLICKHOUSE_USER:-yuktiops}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-yuktiops_otel}
 
 x-app-hardening: &app-hardening
   image: ${APP_IMAGE:-yuktiops-app}:${APP_TAG:-latest}
@@ -51,6 +55,7 @@ services:
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      OTLP_DOMAIN: ${OTLP_DOMAIN:-otlp.invalid}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
     ports:
       - '80:80'
@@ -226,6 +231,37 @@ services:
       retries: 10
     logging: *logging
 
+  # Worker for OTLP batches (decode, redact, sample, insert into ClickHouse). No internet access needed.
+  worker-otel:
+    <<: *worker
+    command: ['node', 'backend/src/worker.js', '--role=otel']
+    healthcheck:
+      <<: *worker-health
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:9106/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  # Trace and log storage. Internal network only, no published port; per-row TTL follows the plan.
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.33.6-alpine
+    init: true
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-yuktiops}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    networks: [internal]
+    deploy:
+      resources: { limits: { cpus: '2.0', memory: 3G } }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8123/ping | grep -q Ok']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
   db:
     image: ${DB_IMAGE:-yuktiops-db}:${DB_TAG:-pg16-ts2.17}
     build: { context: ./deploy/postgres }
@@ -298,6 +334,7 @@ networks:
 volumes:
   db-data:
   redis-data:
+  clickhouse-data:
   pgbackrest-spool:
   pgbackrest-log:
   caddy-data:

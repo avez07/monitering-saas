@@ -206,7 +206,7 @@ test('housekeeping schedulers are installed once; roles start together and repor
   const names = (await housekeepingQueue().getJobSchedulers()).map((s) => s.key).sort();
   assert.deepEqual(names, Object.keys(JOBS).sort());
 
-  assert.deepEqual(roleNames().sort(), ['alerts', 'checks', 'housekeeping', 'ingest', 'notify']);
+  assert.deepEqual(roleNames().sort(), ['alerts', 'checks', 'housekeeping', 'ingest', 'notify', 'otel']);
   assert.equal(parseRole(['--role=notify'], {}), 'notify');
   assert.equal(parseRole([], {}), 'all');
   await assert.rejects(() => startRoles(store, 'nope'), /Unknown worker role/);
@@ -224,7 +224,7 @@ test('startRoles("all") serves /healthz and stops gracefully', async () => {
   );
   assert.equal(body.status, 200);
   assert.equal(body.json.redis, true);
-  assert.deepEqual(Object.keys(body.json.queues).sort(), ['alerts', 'checks', 'housekeeping', 'ingest', 'lastseen', 'notify', 'side-effects']);
+  assert.deepEqual(Object.keys(body.json.queues).sort(), ['alerts', 'checks', 'housekeeping', 'ingest', 'lastseen', 'notify', 'otel', 'side-effects']);
   await worker.stop();
   await getQueue('checks'); // queues can be re-created after a stop
 });

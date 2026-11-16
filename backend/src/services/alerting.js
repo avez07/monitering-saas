@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { metricSources, templates, DEFAULT_TEMPLATE_KEYS, normalizeRule, ruleSummary } from './alert-metrics.js';
+import { metricSources, subjectLoaders, templates, DEFAULT_TEMPLATE_KEYS, normalizeRule, ruleSummary } from './alert-metrics.js';
 import { ensureResource } from './checks.js';
 import { enqueueDelivery } from '../queues/notify.js';
 
@@ -164,7 +164,9 @@ async function loadSubjects(store, orgId) {
 }
 const inScope = (rule, subject) =>
   rule.scopeType !== 'selected' ||
-  (subject.kind === 'server'
+  (subject.kind === 'app'
+    ? rule.scopeIds.includes(subject.service) || rule.scopeIds.includes(subject.resource.id)
+    : subject.kind === 'server'
     ? rule.scopeIds.includes(subject.agent.id) || rule.scopeIds.includes(subject.resource.id)
     : rule.scopeIds.includes(subject.monitor.id) || rule.scopeIds.includes(subject.resource.id));
 
@@ -184,13 +186,23 @@ export async function evaluateAlerts(store, orgId, { now = Date.now() } = {}) {
   const orgs = [...new Set([...rules.map((r) => r.orgId), ...openAll.map((i) => i.orgId)])];
   for (const id of orgs) {
     const subjects = await loadSubjects(store, id);
-    const ctx = { store, now };
+    const ctx = { store, now, orgId: id };
     const open = await store.client.alertIncident.findMany({ where: { orgId: id, state: { in: OPEN } } });
     const openBy = new Map(open.map((i) => [`${i.ruleId}:${i.resourceId}`, i]));
     const kept = new Set();
     for (const rule of rules.filter((r) => r.orgId === id)) {
       const source = metricSources.get(rule.metric);
       if (!source) continue;
+      // Optional kinds (apps) load their subjects on first use; a storage outage skips only those rules.
+      if (subjects[source.kind] === undefined && subjectLoaders.has(source.kind)) {
+        try {
+          subjects[source.kind] = await subjectLoaders.get(source.kind)(store, id);
+        } catch (error) {
+          console.error(`Alert subjects (${source.kind}):`, error.message);
+          subjects[source.kind] = null;
+        }
+      }
+      if (!subjects[source.kind]) continue;
       const scoped = subjects[source.kind].filter((s) => inScope(rule, s));
       // One SQL per rule over every subject (window aggregates), instead of one query per subject.
       let rctx = ctx;

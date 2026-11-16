@@ -12,9 +12,11 @@
     "db:seed": "node prisma/seed.js",
     "db:validate": "node scripts/validate-schema.mjs",
     "worker": "node src/worker.js",
-    "worker:dev": "node --watch src/worker.js"
+    "worker:dev": "node --watch src/worker.js",
+    "ch:migrate": "node clickhouse/run.mjs"
   },
   "dependencies": {
+    "@clickhouse/client": "1.25.0",
     "@prisma/client": "6.19.3",
     "bullmq": "^6.7.6",
     "cors": "^2.8.5",
@@ -23,6 +25,7 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.11.1",
     "nodemailer": "^10.1.2",
+    "protobufjs": "8.8.1",
     "rate-limiter-flexible": "^11.5.0",
     "zod": "^3.25.76"
   },

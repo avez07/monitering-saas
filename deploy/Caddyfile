@@ -106,3 +106,30 @@
 		format json
 	}
 }
+
+# OpenTelemetry ingest (Phase 18): customers point OTEL_EXPORTER_OTLP_ENDPOINT here. Only the three OTLP/HTTP
+# paths are proxied; everything else is 404, so the agent API and dashboard API are not reachable on this host.
+# OTLP_DOMAIN=otlp.yuktiops.com. (gRPC on :4317 is not offered yet.)
+{$OTLP_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	@otlp path /v1/traces /v1/logs /v1/metrics
+	handle @otlp {
+		request_body {
+			max_size 5MB
+		}
+		import api_upstream {
+			transport http {
+				response_header_timeout 30s
+			}
+		}
+	}
+	handle {
+		respond 404
+	}
+	log {
+		output stdout
+		format json
+	}
+}

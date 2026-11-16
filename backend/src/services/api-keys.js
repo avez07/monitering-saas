@@ -10,13 +10,15 @@ export async function createApiKey(store, orgId, userId) {
   const row = await store.create('apiKey', {
     orgId,
     createdById: userId,
+    kind: 'install',
     prefix: raw.slice(0, 12),
     tokenHash: digest(raw),
   });
   return { raw, row };
 }
+/** The organization's one active install key (telemetry keys are a separate kind, see otel-auth.js). */
 export const activeApiKey = async (store, orgId) =>
-  (await store.list('apiKey', { orgId, revokedAt: null }))[0] || null;
+  (await store.list('apiKey', { orgId, kind: 'install', revokedAt: null }))[0] || null;
 
 /**
  * Authenticate an install/registration request with the account API key. Repeated wrong keys from
@@ -30,7 +32,7 @@ export function apiKeyAuth(store, limits) {
       const key =
         raw.startsWith(`${KEY_PREFIX}_`) &&
         (await store.find('apiKey', { tokenHash: digest(raw) }));
-      if (!key || key.revokedAt) {
+      if (!key || key.revokedAt || key.kind !== 'install') {
         await limits.record(`v1:badkey:${req.ip}`, 600);
         assert(false, 401, 'The API key is missing, wrong or has been revoked.');
       }

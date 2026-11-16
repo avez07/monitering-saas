@@ -7,16 +7,18 @@ import { registerTelegramWebhook } from './services/contacts.js';
 import { allowLoopbackForTests } from './services/uptime.js';
 import { closeRedis } from './lib/redis.js';
 import { ingestRole } from './queues/ingest.js';
+import { otelRole } from './queues/otel.js';
 registerRole('ingest', ingestRole);
+registerRole('otel', otelRole);
 
 /**
  * Background worker, one process per role (or `all` in dev):
- *   node src/worker.js --role=checks|alerts|notify|housekeeping|all     (default all; env WORKER_ROLE)
+ *   node src/worker.js --role=checks|alerts|notify|housekeeping|ingest|otel|all     (default all; env WORKER_ROLE)
  * Each role serves GET /healthz on WORKER_HEALTH_PORT (default per role: all 9100, checks 9101, alerts
  * 9102, notify 9103, housekeeping 9104; 0 turns it off). BullMQ guarantees a scheduled job runs once
  * however many workers run, so scaling out is just starting more processes.
  */
-export const DEFAULT_HEALTH_PORTS = { all: 9100, checks: 9101, alerts: 9102, notify: 9103, housekeeping: 9104, ingest: 9105 };
+export const DEFAULT_HEALTH_PORTS = { all: 9100, checks: 9101, alerts: 9102, notify: 9103, housekeeping: 9104, ingest: 9105, otel: 9106 };
 
 export function parseRole(argv = process.argv.slice(2), env = process.env) {
   const flag = argv.find((a) => a.startsWith('--role='));

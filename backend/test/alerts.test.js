@@ -35,7 +35,7 @@ test('new organizations get three active default rules; templates create valid r
   assert.equal(disk.summary, 'Alert me when disk space used is above 85% for 5 minutes on all servers.');
 
   const templates = (await owner.client.get('/api/alerts/templates')).body.items;
-  assert.equal(templates.length, 10);
+  assert.equal(templates.length, 13);
   assert.equal(templates.find((t) => t.key === 'disk_almost_full').alreadyCreated, true);
   assert.equal(templates.find((t) => t.key === 'container_stopped').available, false);
   // Every template produces a valid rule (the free plan allows 5 rules, so create paid-plan style by upgrading).

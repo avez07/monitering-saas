@@ -56,6 +56,8 @@ export function alertRoutes(store, limits) {
           assert(hit, 400, 'One of the selected servers was not found.');
           return hit.agentId ?? hit.id;
         });
+      } else if (kind === 'app') {
+        ids = ids.map((i) => String(i)); // services are identified by name
       } else {
         const monitors = await store.list('uptimeMonitor', { orgId });
         ids = ids.map((i) => {

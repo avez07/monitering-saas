@@ -191,6 +191,12 @@ export default function Overview() {
           action={{ label: 'Add your first server', to: '/add-server' }}
         />
         <p className="mt-4 text-center text-muted-foreground">
+          Running an app instead?{' '}
+          <Link to="/apps/connect" className="font-medium text-foreground underline underline-offset-4">
+            Connect your app with OpenTelemetry
+          </Link>
+        </p>
+        <p className="mt-2 text-center text-muted-foreground">
           No server to install on?{' '}
           <Link to="/websites" className="font-medium text-foreground underline underline-offset-4">
             Monitor a website instead

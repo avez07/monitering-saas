@@ -1,15 +1,17 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { CreditCard, KeyRound, User, Users } from 'lucide-react';
+import { Activity, CreditCard, KeyRound, User, Users } from 'lucide-react';
 import { PageHeader } from '@/components/app';
 import { cn } from '@/lib/utils';
 import Team from './Team';
 import ApiKey from './ApiKey';
+import Telemetry from './Telemetry';
 import Plan from './Plan';
 import Account from './Account';
 
 const tabs = [
   { to: '/settings/team', label: 'Team', icon: Users },
   { to: '/settings/api-key', label: 'API key', icon: KeyRound },
+  { to: '/settings/telemetry', label: 'Telemetry', icon: Activity },
   { to: '/settings/plan', label: 'Plan & billing', icon: CreditCard },
   { to: '/settings/account', label: 'Account', icon: User },
 ];
@@ -17,7 +19,7 @@ const tabs = [
 export default function Settings() {
   return (
     <div>
-      <PageHeader title="Settings" description="Your team, API key, plan and account." />
+      <PageHeader title="Settings" description="Your team, API key, telemetry, plan and account." />
       <div className="flex flex-col gap-6 md:flex-row md:gap-10">
         <nav
           aria-label="Settings sections"
@@ -46,6 +48,7 @@ export default function Settings() {
             <Route index element={<Navigate to="/settings/team" replace />} />
             <Route path="team" element={<Team />} />
             <Route path="api-key" element={<ApiKey />} />
+            <Route path="telemetry" element={<Telemetry />} />
             <Route path="plan" element={<Plan />} />
             {/* Payment pages return to /settings/billing?checkout=success|cancelled */}
             <Route path="billing" element={<Plan />} />

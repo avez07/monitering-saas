@@ -70,6 +70,7 @@ model Organization {
   invoices             Invoice[]
   notificationChannels NotificationChannel[]
   apiKeys              ApiKey[]
+  telemetrySettings    TelemetrySettings?
   agentConfigs         AgentConfig[]
   payments             Payment[]
   uptimeChecks         UptimeCheck[]
@@ -199,6 +200,8 @@ model ApiKey {
   id           String       @id @default(uuid())
   orgId        String
   name         String       @default("Account key")
+  /// "install" (yk_live_..., registers servers) or "telemetry" (yk_otel_..., write-only OTLP ingest).
+  kind         String       @default("install")
   prefix       String
   tokenHash    String       @unique
   createdById  String
@@ -209,6 +212,7 @@ model ApiKey {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, revokedAt])
+  @@index([orgId, kind, revokedAt])
 }
 
 /// A setup profile ("st_...") the agent pulls. Settings only toggle built-in, read-only collectors.
@@ -670,4 +674,15 @@ model ContainerMetric {
 
   @@id([containerId, time])
   @@map("container_metrics")
+}
+
+/// Per-organization OpenTelemetry settings: redaction rules and sampling (retention follows the plan,
+/// usage lives in Redis counters). One row per organization, created on first save.
+model TelemetrySettings {
+  orgId        String       @id
+  redaction    Json         @default("[]")
+  sampling     Json         @default("{}")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }

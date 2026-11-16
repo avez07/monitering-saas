@@ -17,6 +17,7 @@ const Services = lazy(() => import('@/pages/services'));
 const Websites = lazy(() => import('@/pages/websites'));
 const Alerts = lazy(() => import('@/pages/alerts'));
 const Settings = lazy(() => import('@/pages/settings'));
+const Apps = lazy(() => import('@/pages/apps'));
 const AddServer = lazy(() => import('@/pages/add-server'));
 
 /** Signed-out only (login, register, forgot password): signed-in users go to the dashboard. */
@@ -70,6 +71,7 @@ export const routes = [
           { path: '/containers', element: <Containers /> },
           { path: '/services/*', element: <Services /> },
           { path: '/websites/*', element: <Websites /> },
+          { path: '/apps/*', element: <Apps /> },
           { path: '/alerts/*', element: <Alerts /> },
           { path: '/settings/*', element: <Settings /> },
           { path: '/add-server', element: <AddServer /> },

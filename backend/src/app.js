@@ -21,6 +21,8 @@ import { containerRoutes } from './routes/containers.js';
 import { serviceRoutes } from './routes/services.js';
 import { downloadsStatic, releasesRoute } from './routes/downloads.js';
 import { billingRoutes, billingWebhookRoutes } from './routes/billing.js';
+import { otlpRoutes } from './routes/otlp.js';
+import { appsRoutes } from './routes/apps.js';
 import { internalRoutes } from './routes/metrics-internal.js';
 
 export function createApp(store, limits) {
@@ -68,6 +70,9 @@ export function createApp(store, limits) {
   app.use('/api/webhooks', billingWebhookRoutes(store));
   // The agent protocol. Bearer credentials only (no cookies), and gzip bodies are accepted. This runs
   // before the small default JSON limit because a batch of buffered samples is larger than a form post.
+  // OpenTelemetry (OTLP/HTTP) on the standard /v1/traces|logs|metrics paths; auth is a yk_otel_ key header.
+  // Only those three POST paths are handled here, everything else under /v1 falls through to the agent API.
+  app.use('/v1', otlpRoutes(store, limits));
   app.use('/v1', express.json({ limit: '512kb' }), v1Routes(store, limits), v1ErrorRecorder(store));
   // Agent downloads (built by `npm run agent:dist`) and the public release list used by the wizard.
   app.use('/downloads', downloadsStatic());
@@ -95,6 +100,7 @@ export function createApp(store, limits) {
   secured.use(websiteRoutes(store, limits));
   secured.use(containerRoutes(store));
   secured.use(serviceRoutes(store));
+  secured.use(appsRoutes(store));
   app.use('/api', secured);
   app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   if (existsSync(`${root}/frontend/dist/index.html`)) {
