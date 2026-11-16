@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,6 +114,28 @@ func (c *Client) CloseIdle() { c.http.CloseIdleConnections() }
 type APIError struct {
 	Status  int
 	Message string
+	// RetryAfter is the server's Retry-After hint (zero when absent or unparsable).
+	RetryAfter time.Duration
+}
+
+// parseRetryAfter reads a Retry-After header: delta-seconds or an HTTP date.
+func parseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 {
+			return 0
+		}
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func (e *APIError) Error() string {
@@ -179,7 +202,7 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, payload an
 		out.Date = d
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		apiErr := &APIError{Status: res.StatusCode}
+		apiErr := &APIError{Status: res.StatusCode, RetryAfter: parseRetryAfter(res.Header.Get("Retry-After"), time.Now())}
 		var parsed struct {
 			Error string `json:"error"`
 		}
@@ -269,6 +292,8 @@ type IngestResponse struct {
 		ID      string `json:"id"`
 		Version int    `json:"version"`
 	} `json:"config"`
+	// ConfigVersion is the settings version announced by the 202 Accepted answer (no profile id).
+	ConfigVersion int       `json:"configVersion"`
 	ServerTime time.Time `json:"serverTime"`
 }
 
@@ -282,6 +307,9 @@ func (c *Client) Ingest(ctx context.Context, credential string, req *IngestReque
 		return nil, err
 	}
 	var out IngestResponse
+	if res.Status == http.StatusAccepted && len(bytes.TrimSpace(res.Body)) == 0 {
+		return &out, nil // 202 with no body: accepted, nothing announced
+	}
 	if err := json.Unmarshal(res.Body, &out); err != nil {
 		return nil, errors.New("the server's answer was not understood")
 	}

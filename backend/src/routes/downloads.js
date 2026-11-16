@@ -2,7 +2,9 @@ import { Router } from 'express';
 import express from 'express';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { config, root } from '../config.js';
+import { getRedis } from '../lib/redis.js';
 
 const CACHE_MS = 5 * 60000;
 const MAX_LATEST_BYTES = 256 * 1024;
@@ -141,11 +143,17 @@ export function releasesRoute({
   fetchImpl = fetch,
   now = Date.now,
   publicApiUrl = config.API_PUBLIC_URL,
+  cacheNamespace,
 } = {}) {
   const remote = baseUrl ? baseUrl.replace(/\/+$/, '') : null;
   if (remote && !remote.startsWith('https://') && !LOOPBACK.test(remote))
     throw new Error('AGENT_DOWNLOADS_BASE_URL must use https (http is only allowed for localhost).');
-  let cached = null; // { at, body }
+  // The last good answer lives in Redis so every instance shares it: { at, body }.
+  const cacheKey = `releases:${createHash('sha1')
+    .update(cacheNamespace || `${remote || resolve(dir)}|${publicApiUrl}`)
+    .digest('hex')}`;
+  const readCache = async () => JSON.parse((await getRedis().get(cacheKey)) || 'null');
+  const writeCache = (value) => getRedis().set(cacheKey, JSON.stringify(value), 'EX', 86400);
   const router = Router();
 
   async function load() {
@@ -170,9 +178,11 @@ export function releasesRoute({
   }
 
   router.get('/api/agent/releases', async (req, res) => {
+    let cached = await readCache();
     if (!cached || now() - cached.at > CACHE_MS) {
       try {
         cached = { at: now(), body: await load() };
+        await writeCache(cached);
       } catch (error) {
         if (!cached) {
           if (!remote && error.code === 'ENOENT')
@@ -184,6 +194,7 @@ export function releasesRoute({
         }
         // Keep serving the last good answer, and retry in a minute rather than on every request.
         cached = { at: now() - CACHE_MS + 60000, body: cached.body };
+        await writeCache(cached);
       }
     }
     res.set('Cache-Control', 'public, max-age=300');

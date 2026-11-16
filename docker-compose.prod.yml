@@ -19,6 +19,7 @@ x-app-env: &app-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-30000}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
 
 x-app-hardening: &app-hardening
   image: ${APP_IMAGE:-yuktiops-app}:${APP_TAG:-latest}
@@ -71,6 +72,7 @@ services:
     networks: [edge, internal]
     depends_on:
       db: { condition: service_healthy }
+      redis: { condition: service_healthy }
     deploy:
       resources: { limits: { cpus: '1.5', memory: 768M } }
     healthcheck:
@@ -95,12 +97,42 @@ services:
     networks: [egress, internal]
     depends_on:
       db: { condition: service_healthy }
+      redis: { condition: service_healthy }
     deploy:
       resources: { limits: { cpus: '1.0', memory: 512M } }
     # No HTTP port: the image's API healthcheck does not apply. Liveness is the worker lease in the database (runbook).
     healthcheck:
       disable: true
     stop_grace_period: 30s
+
+  redis:
+    image: redis:7
+    init: true
+    restart: unless-stopped
+    # AOF everysec, noeviction, password; no published port (internal network only).
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 512M } }
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH=$${REDIS_PASSWORD} redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
 
   db:
     image: ${DB_IMAGE:-yuktiops-db}:${DB_TAG:-pg16-ts2.17}
@@ -173,6 +205,7 @@ networks:
 
 volumes:
   db-data:
+  redis-data:
   pgbackrest-spool:
   pgbackrest-log:
   caddy-data:

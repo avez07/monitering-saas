@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { WATCHED, bumpAgentCache } from '../services/agent-cache.js';
+import { WATCHED, invalidateAgents } from '../services/agent-cache.js';
 
 // One small repository contract over Prisma, so services stay readable and tests can use a real database.
 export class PrismaStore {
@@ -12,60 +12,64 @@ export class PrismaStore {
   find(table, where) {
     return this.client[table].findFirst({ where });
   }
-  /** Writes to tables the ingest cache mirrors invalidate it (see services/agent-cache.js). */
-  #touch(table) {
-    if (WATCHED.has(table)) bumpAgentCache();
+  /**
+   * Writes to tables the ingest cache mirrors invalidate it on every API instance (see
+   * services/agent-cache.js). Credential revocations also mark each credential revoked in Redis.
+   * It runs before and after the write so a cache refill that races the write cannot survive.
+   */
+  async #touch(table, { target = '*', revoked = [] } = {}) {
+    if (WATCHED.has(table)) await invalidateAgents(target, { revokedCredentialIds: revoked });
   }
-  async create(table, data) {
-    this.#touch(table);
+  /** Ids of credentials a write is about to revoke (so they can be blocked instantly everywhere). */
+  async #revoking(table, where, data) {
+    if (table !== 'agentCredential' || !data?.revokedAt) return [];
+    return (await this.client.agentCredential.findMany({ where, select: { id: true } })).map(
+      (row) => row.id,
+    );
+  }
+  async #write(table, opts, run) {
+    await this.#touch(table, opts);
     try {
-      return await this.client[table].create({ data });
+      return await run();
     } finally {
-      this.#touch(table);
+      await this.#touch(table, opts);
     }
+  }
+  create(table, data) {
+    return this.#write(table, {}, () => this.client[table].create({ data }));
   }
   async update(table, id, data) {
-    this.#touch(table);
-    try {
-      return await this.client[table].update({ where: { id }, data });
-    } finally {
-      this.#touch(table);
-    }
+    const revoked = await this.#revoking(table, { id }, data);
+    const target = table === 'agent' ? id : '*';
+    return this.#write(table, { target, revoked }, () =>
+      this.client[table].update({ where: { id }, data }),
+    );
   }
   async remove(table, id) {
-    this.#touch(table);
-    try {
-      return await this.client[table].delete({ where: { id } });
-    } finally {
-      this.#touch(table);
-    }
+    const revoked = table === 'agentCredential' ? [id] : [];
+    return this.#write(table, { revoked }, () => this.client[table].delete({ where: { id } }));
   }
   /** Update every row matching a Prisma `where`. Returns how many rows changed. */
   async updateMany(table, where, data) {
-    this.#touch(table);
-    try {
-      return (await this.client[table].updateMany({ where, data })).count;
-    } finally {
-      this.#touch(table);
-    }
+    const revoked = await this.#revoking(table, where, data);
+    return this.#write(
+      table,
+      { revoked },
+      async () => (await this.client[table].updateMany({ where, data })).count,
+    );
   }
   /** Delete every row matching a Prisma `where` (including operators such as `{ lt }`). */
-  async removeMany(table, where) {
-    this.#touch(table);
-    try {
-      return (await this.client[table].deleteMany({ where })).count;
-    } finally {
-      this.#touch(table);
-    }
+  removeMany(table, where) {
+    return this.#write(table, {}, async () => (await this.client[table].deleteMany({ where })).count);
   }
   /** Atomically update a row only if it still matches `where`. Returns true when it did. */
   async claim(table, id, where, data) {
-    this.#touch(table);
-    try {
-      return (await this.client[table].updateMany({ where: { id, ...where }, data })).count === 1;
-    } finally {
-      this.#touch(table);
-    }
+    const revoked = await this.#revoking(table, { id, ...where }, data);
+    return this.#write(
+      table,
+      { revoked },
+      async () => (await this.client[table].updateMany({ where: { id, ...where }, data })).count === 1,
+    );
   }
   transaction(fn) {
     return this.client.$transaction((tx) => fn(new PrismaStore(tx)), {

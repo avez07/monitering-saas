@@ -1,76 +1,61 @@
+import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
 import { assert } from '../lib/errors.js';
+import { getRedis } from '../lib/redis.js';
 
-/** In-memory fixed-window counters. Fine for a single API process; move to the database if we ever scale out. */
+/**
+ * Fixed-window counters shared by every API instance through Redis (rate-limiter-flexible). Counters
+ * expire with their window and Redis runs with noeviction, so failure counters (`record`, the login and
+ * API-key lockouts) can never be pushed out by a flood of other keys. If Redis is unreachable the call
+ * rejects (fails closed with a 500) rather than silently disabling the limit.
+ */
 export class Limits {
-  /**
-   * Entries expire with their window and are swept as the map grows. If a flood of distinct keys still
-   * fills it, the oldest plain rate-limit counters are evicted first. Failure counters (`record`, the
-   * login and API-key lockouts) are "sticky": they are only ever removed by expiry, never by eviction.
-   */
-  constructor({ softLimit = 10000, hardLimit = 100000, stickyLimit = 1000000 } = {}) {
-    this.windows = new Map(); // id -> { count, expiresAt, sticky }
-    this.softLimit = softLimit;
-    this.hardLimit = hardLimit;
-    this.stickyLimit = stickyLimit;
-    this.nextSweepAt = 0;
-    this.nextForcedSweepAt = 0;
+  constructor({ redis = getRedis() } = {}) {
+    this.redis = redis;
+    this.limiters = new Map(); // "points:seconds" -> RateLimiterRedis
   }
-  #id(key, seconds) {
-    return `${key}:${Math.floor(Date.now() / (seconds * 1000))}`;
+  #limiter(maximum, seconds) {
+    const id = `${maximum}:${seconds}`;
+    let limiter = this.limiters.get(id);
+    if (!limiter)
+      this.limiters.set(
+        id,
+        (limiter = new RateLimiterRedis({
+          storeClient: this.redis,
+          keyPrefix: 'rl',
+          points: maximum,
+          duration: seconds,
+        })),
+      );
+    return limiter;
   }
-  #sweep(now) {
-    for (const [id, entry] of this.windows) if (entry.expiresAt <= now) this.windows.delete(id);
-    this.nextSweepAt = now + 1000;
-    this.nextForcedSweepAt = 0;
-    if (this.windows.size <= this.hardLimit) return;
-    // Still too big: drop the oldest non-sticky counters (Map keeps insertion order).
-    const target = Math.floor(this.hardLimit * 0.9);
-    for (const [id, entry] of this.windows) {
-      if (this.windows.size <= target) break;
-      if (!entry.sticky) this.windows.delete(id);
+  /** The window length is part of the key, so the same name with another window is a separate counter. */
+  #key = (key, seconds) => `${key}|${seconds}`;
+  async #consume(key, amount, maximum, seconds) {
+    try {
+      await this.#limiter(maximum, seconds).consume(this.#key(key, seconds), amount);
+      return true;
+    } catch (error) {
+      if (error instanceof RateLimiterRes) return false;
+      throw error;
     }
-    // Mostly sticky entries left: do not rescan on every request.
-    if (this.windows.size > target) this.nextForcedSweepAt = now + 1000;
-    // Pathological: only sticky entries remain above the cap; shed the oldest of those last.
-    for (const id of this.windows.keys()) {
-      if (this.windows.size <= this.stickyLimit) break;
-      this.windows.delete(id);
-    }
-  }
-  #add(key, amount, seconds, sticky = false) {
-    const now = Date.now();
-    const size = this.windows.size;
-    if (
-      (size > this.softLimit && now >= this.nextSweepAt) ||
-      (size > this.hardLimit && now >= this.nextForcedSweepAt)
-    )
-      this.#sweep(now);
-    const id = this.#id(key, seconds);
-    const entry = this.windows.get(id);
-    const count = (entry?.count || 0) + amount;
-    this.windows.set(id, {
-      count,
-      sticky: sticky || Boolean(entry?.sticky),
-      expiresAt: (Math.floor(now / (seconds * 1000)) + 1) * seconds * 1000,
-    });
-    return count;
   }
   /** Count a hit and reject when the window total exceeds `maximum`. */
   async use(key, amount, maximum, seconds = 60) {
     assert(
-      this.#add(key, amount, seconds) <= maximum,
+      await this.#consume(key, amount, maximum, seconds),
       429,
       'Usage limit reached. Please retry after the current window.',
     );
   }
   /** Count a hit without rejecting (used for failed-login counters). */
   async record(key, seconds = 60) {
-    this.#add(key, 1, seconds, true);
+    await this.#consume(key, 1, Number.MAX_SAFE_INTEGER, seconds);
   }
   /** Reject when the window total has already reached `maximum`, without counting. */
   async assertUnder(key, maximum, seconds, message) {
+    const state = await this.#limiter(maximum, seconds).get(this.#key(key, seconds));
     assert(
-      (this.windows.get(this.#id(key, seconds))?.count || 0) < maximum,
+      (state?.consumedPoints || 0) < maximum,
       429,
       message || 'Too many attempts. Please try again later.',
     );
@@ -122,4 +107,4 @@ export async function enforceCount(store, orgId, key, count) {
     `Your ${plan.name} plan allows ${limit} ${noun}. Upgrade to add more.`,
   );
 }
-export const createLimits = () => new Limits();
+export const createLimits = (options) => new Limits(options);

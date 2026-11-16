@@ -181,6 +181,7 @@ test('production configuration refuses plain http and placeholder secrets', () =
     APP_URL: 'https://app.yuktiops.com',
     API_PUBLIC_URL: 'https://api.yuktiops.com',
     DATABASE_URL: 'postgresql://app:Rk29x8vQzP1@db.internal:5432/yuktiops',
+    REDIS_URL: 'redis://:s3cret@redis:6379/0',
     BILLING_WEBHOOK_SECRET: 'f3a9c1d4e7b2486a90be5d17c8a2f6e0',
   };
   assert.doesNotThrow(() => loadConfig(good));
@@ -191,6 +192,7 @@ test('production configuration refuses plain http and placeholder secrets', () =
     /BILLING_WEBHOOK_SECRET/,
   );
   assert.throws(() => loadConfig({ ...good, DATABASE_URL: undefined }), /DATABASE_URL/);
+  assert.throws(() => loadConfig({ ...good, REDIS_URL: undefined }), /REDIS_URL/);
   // Development stays easy to run.
   assert.doesNotThrow(() =>
     loadConfig({ ...good, NODE_ENV: 'development', APP_URL: 'http://localhost:5173' }),

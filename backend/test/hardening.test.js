@@ -1,6 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Limits } from '../src/services/limits.js';
 import { setup, closeStore, register } from './helpers.js';
 import { enrollServer, registerAgent, ingest, payload, sample } from './agent-helpers.js';
 
@@ -9,29 +8,6 @@ beforeEach(async () => {
   ({ store, app } = await setup());
 });
 after(closeStore);
-
-test('limits evict plain counters under pressure but never reset lockouts', async () => {
-  const limits = new Limits({ softLimit: 50, hardLimit: 100, stickyLimit: 1000 });
-  for (let i = 0; i < 10; i++) await limits.record('login:fail:victim@example.com', 900);
-  await assert.rejects(limits.assertUnder('login:fail:victim@example.com', 10, 900), {
-    status: 429,
-  });
-  // A flood of distinct keys (an attack, or just many users) must not wipe the lockout.
-  await new Promise((r) => setTimeout(r, 1100)); // let the sweep interval pass
-  for (let i = 0; i < 1000; i++) await limits.use(`ingest:agent-${i}`, 1, 30, 60);
-  assert.ok(limits.windows.size <= 150, `bounded, got ${limits.windows.size}`);
-  await assert.rejects(limits.assertUnder('login:fail:victim@example.com', 10, 900), {
-    status: 429,
-  });
-});
-
-test('expired windows are swept away', async () => {
-  const limits = new Limits({ softLimit: 5, hardLimit: 1000 });
-  for (let i = 0; i < 20; i++) await limits.use(`k${i}`, 1, 5, 1);
-  await new Promise((r) => setTimeout(r, 2100));
-  await limits.use('trigger', 1, 5, 60);
-  assert.ok(limits.windows.size <= 2, `expired windows removed, got ${limits.windows.size}`);
-});
 
 test('bulk rollouts register well past the old 60 per hour address cap', async () => {
   const owner = await register(app, 'Rollout');

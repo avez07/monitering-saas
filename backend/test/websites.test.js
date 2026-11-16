@@ -12,7 +12,7 @@ import {
   refreshDomainExpiry,
   resetRdapCache,
 } from '../src/services/rdap.js';
-import { setup, closeStore, register, addMember } from './helpers.js';
+import { setup, closeStore, register, addMember, flushRedis } from './helpers.js';
 import { captureTransports, resetTransports, fakeServer } from './b2-helpers.js';
 
 let store, app, limits, sent, site, mode;
@@ -100,7 +100,7 @@ test('http, keyword, api and tcp checks work against a local server', async () =
     return res.body;
   };
   const run = async (website) => {
-    limits.windows.clear(); // the real route allows 10 manual checks a minute
+    await flushRedis(); // the real route allows 10 manual checks a minute
     return (await owner.client.post(`/api/websites/${website.id}/check`)).body;
   };
 
@@ -326,7 +326,7 @@ test('RDAP: domain names, bootstrap lookup, expiry parsing, unsupported TLDs and
   assert.equal(rdapServerFor(bootstrap, 'dev'), 'https://rdap.dev.example/');
   assert.equal(rdapServerFor(bootstrap, 'zz'), null);
 
-  resetRdapCache();
+  await resetRdapCache();
   const calls = [];
   const fetchJson = async (url) => {
     calls.push(url);
@@ -340,13 +340,13 @@ test('RDAP: domain names, bootstrap lookup, expiry parsing, unsupported TLDs and
   assert.equal(calls[1], 'https://rdap.verisign.example/com/v1/domain/example.com');
   assert.equal((await lookupDomainExpiry('thing.zz', { fetchJson })).status, 'unsupported');
   assert.equal(calls.filter((c) => c.includes('iana')).length, 1, 'bootstrap is cached');
-  resetRdapCache();
+  await resetRdapCache();
   const down = await lookupDomainExpiry('example.com', { fetchJson: async () => Promise.reject(new Error('boom')) });
   assert.equal(down.status, 'error');
 });
 
 test('domain expiry is refreshed by the worker, shown with warning bands and can alert', async () => {
-  resetRdapCache();
+  await resetRdapCache();
   const owner = await register(app, 'Domain');
   const now = Date.now();
   const row = await store.create('uptimeMonitor', {

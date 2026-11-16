@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { safeRequest } from './uptime.js';
+import { getRedis } from '../lib/redis.js';
 
 const BOOTSTRAP_URL = 'https://data.iana.org/rdap/dns.json';
 const SECOND_LEVEL = new Set([
@@ -44,9 +45,19 @@ const defaultFetchJson = async (url) => {
   return JSON.parse(response.body);
 };
 
-let bootstrapCache = { at: 0, data: null };
-export function resetRdapCache() {
-  bootstrapCache = { at: 0, data: null };
+// The IANA bootstrap file is cached in Redis (shared by every instance), refreshed daily.
+const BOOTSTRAP_KEY = 'rdap:bootstrap';
+const BOOTSTRAP_TTL_SECONDS = 86400;
+export async function resetRdapCache() {
+  await getRedis().del(BOOTSTRAP_KEY);
+}
+async function bootstrapData(fetchJson) {
+  const redis = getRedis();
+  const cached = await redis.get(BOOTSTRAP_KEY);
+  if (cached) return JSON.parse(cached);
+  const data = await fetchJson(BOOTSTRAP_URL);
+  await redis.set(BOOTSTRAP_KEY, JSON.stringify(data), 'EX', BOOTSTRAP_TTL_SECONDS);
+  return data;
 }
 
 /**
@@ -55,9 +66,7 @@ export function resetRdapCache() {
  */
 export async function lookupDomainExpiry(domain, { fetchJson = defaultFetchJson, now = Date.now() } = {}) {
   try {
-    if (!bootstrapCache.data || now - bootstrapCache.at > 86400000)
-      bootstrapCache = { at: now, data: await fetchJson(BOOTSTRAP_URL) };
-    const server = rdapServerFor(bootstrapCache.data, domain.split('.').pop());
+    const server = rdapServerFor(await bootstrapData(fetchJson), domain.split('.').pop());
     if (!server) return { status: 'unsupported', expiresAt: null };
     const json = await fetchJson(`${server.replace(/\/$/, '')}/domain/${encodeURIComponent(domain)}`);
     const expiresAt = parseRdapExpiry(json);

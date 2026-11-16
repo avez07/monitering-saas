@@ -3,6 +3,8 @@ import { createStore } from './data/store.js';
 import { seedPlans } from './data/seed.js';
 import { createLimits } from './services/limits.js';
 import { createApp } from './app.js';
+import { closeRedis } from './lib/redis.js';
+import { closeAgentCache } from './services/agent-cache.js';
 import { allowLoopbackForTests } from './services/uptime.js';
 
 // Browser end-to-end tests monitor a fake site on 127.0.0.1. Never honoured in production.
@@ -23,6 +25,8 @@ async function shutdown() {
   force.unref();
   server.close(async () => {
     await store.close();
+    await closeAgentCache();
+    await closeRedis();
     clearTimeout(force);
     process.exit(0);
   });

@@ -1,4 +1,4 @@
-import { test, before, after } from 'node:test';
+import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
@@ -6,7 +6,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { downloadsStatic, releasesRoute, buildReleases } from '../src/routes/downloads.js';
-import { setup, closeStore } from './helpers.js';
+import { setup, closeStore, flushRedis } from './helpers.js';
+
+beforeEach(flushRedis); // the releases cache lives in Redis
 
 const SHA = 'a'.repeat(64);
 const VERSION = '1.2.3';
@@ -159,7 +161,11 @@ test('releases from the production base URL are fetched once per 5 minutes and s
   await request(app).get('/api/agent/releases');
   assert.equal(calls, 2, 'a failed refresh is not retried on every request');
 
-  const fresh = releasesApp({ baseUrl: 'https://downloads.yuktiops.com/agent', fetchImpl });
+  const fresh = releasesApp({
+    baseUrl: 'https://downloads.yuktiops.com/agent',
+    fetchImpl,
+    cacheNamespace: 'fresh',
+  });
   const down = await request(fresh).get('/api/agent/releases');
   assert.equal(down.status, 503);
 });

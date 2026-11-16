@@ -12,6 +12,8 @@ const schema = z.object({
   // Express "trust proxy" value: a hop count ("1"), "loopback", or a comma-separated list of CIDRs.
   TRUST_PROXY: z.string().default('loopback'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required.'),
+  // Redis is required in every environment: rate limits, lockouts, the agent cache and (later) queues.
+  REDIS_URL: z.string().min(1, 'REDIS_URL is required.'),
   BILLING_PROVIDER: z.enum(['mock']).default('mock'),
   BILLING_WEBHOOK_SECRET: z.string().min(20),
   // Real payment providers (all optional: unset means checkout answers "payments not configured").

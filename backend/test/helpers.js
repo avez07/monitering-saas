@@ -6,13 +6,23 @@ import { hashPassword } from '../src/lib/crypto.js';
 import { Limits } from '../src/services/limits.js';
 import { config } from '../src/config.js';
 import { testDatabaseUrl } from './db-url.js';
+import './redis-url.js'; // routes every Redis user in this process to the test DB index
+import { getRedis, closeRedis } from '../src/lib/redis.js';
+import { resetAgentCache, closeAgentCache } from '../src/services/agent-cache.js';
 import { useMemoryMail } from '../src/services/mail.js';
 
 export const PASSWORD = 'correct-horse-battery';
 let counter = 0;
 let shared;
+const extra = [];
 
-/** Fresh store + app on the test database, with every table emptied and plans seeded. */
+/** Empty the test Redis DB (limits, caches, epochs) and drop in-process agent caches. */
+export async function flushRedis() {
+  await getRedis().flushdb();
+  resetAgentCache();
+}
+
+/** Fresh store + app on the test database, with every table emptied and plans seeded; Redis is flushed too. */
 export async function setup() {
   // TRUNCATE below is destructive: refuse to run against the development database.
   if (new URL(testDatabaseUrl()).pathname === new URL(config.DATABASE_URL).pathname)
@@ -25,6 +35,15 @@ export async function setup() {
   await store.client.$executeRawUnsafe(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
   await seedPlans(store);
   useMemoryMail(); // account emails are captured in `outbox`, never sent
+  await flushRedis();
+  const limits = new Limits();
+  return { store, limits, app: createApp(store, limits) };
+}
+
+/** A second API instance: its own store connection, limiter and agent cache; same database and Redis. */
+export async function secondInstance() {
+  const store = await createStore(testDatabaseUrl());
+  extra.push(store);
   const limits = new Limits();
   return { store, limits, app: createApp(store, limits) };
 }
@@ -76,6 +95,9 @@ export async function addMember(app, store, owner, { role, projectIds = [] }) {
 }
 
 export async function closeStore() {
+  await Promise.all(extra.splice(0).map((s) => s.close()));
   await shared?.close();
   shared = undefined;
+  await closeAgentCache();
+  await closeRedis();
 }

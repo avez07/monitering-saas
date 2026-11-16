@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand/v2"
 	"os"
 	"runtime"
 	"strings"
@@ -379,6 +380,18 @@ func (r *runner) trySend(ctx context.Context) time.Duration {
 	return 0
 }
 
+// maxRetryAfter caps how long a server hint can silence the agent; the buffer holds 15 minutes.
+const maxRetryAfter = 5 * time.Minute
+
+// retryAfterDelay caps the hint at maxRetryAfter and adds 0-20% jitter.
+func retryAfterDelay(hint time.Duration, rnd func() float64) time.Duration {
+	hint = min(hint, maxRetryAfter)
+	if rnd == nil {
+		rnd = rand.Float64
+	}
+	return min(hint+time.Duration(float64(hint)*0.2*rnd()), maxRetryAfter)
+}
+
 func (r *runner) onSuccess(res *client.IngestResponse, sent int) {
 	now := r.now()
 	if r.st.Connection != state.Connected {
@@ -473,6 +486,12 @@ func (r *runner) onFailure(err error, sent int, lastSeq uint64, pending []client
 	default:
 		r.failures++
 		wait := r.netBackoff.Delay(r.failures)
+		// 503/429 with Retry-After: the backend is shedding load. Keep buffering and wait at least
+		// as long as it asks (capped, with jitter so agents do not return in lockstep).
+		var api *client.APIError
+		if errors.As(err, &api) && api.RetryAfter > 0 && (api.Status == 503 || api.Status == 429) {
+			wait = max(wait, retryAfterDelay(api.RetryAfter, r.netBackoff.Rand))
+		}
 		r.notBefore = now.Add(wait)
 		if r.st.Connection != state.Retrying || kind != r.lastErrorKind {
 			r.log.Printf("Not connected: %s Data is being buffered (up to 15 minutes) and the agent keeps retrying.", explanation)
@@ -493,6 +512,16 @@ func (r *runner) onFailure(err error, sent int, lastSeq uint64, pending []client
 func (r *runner) pullConfigIfChanged(ctx context.Context, res *client.IngestResponse) {
 	announced := res.Config
 	current := r.settings.Load()
+	if announced.ID == "" && res.ConfigVersion > 0 {
+		if res.ConfigVersion == current.Version {
+			return
+		}
+		// 202 answers carry only a version number: pull when it differs from the one in use.
+		announced.ID, announced.Version = current.ID, res.ConfigVersion
+		if announced.ID == "" {
+			announced.ID = "version"
+		}
+	}
 	if announced.ID == "" || (announced.ID == current.ID && announced.Version == current.Version) {
 		return
 	}
