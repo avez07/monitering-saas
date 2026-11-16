@@ -581,14 +581,6 @@ model Session {
   @@index([userId])
 }
 
-model WorkerLease {
-  id        String   @id
-  holder    String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 /// Phase 11: current state of one Docker container on one server (identified by its name).
 model ContainerItem {
   id              String    @id @default(uuid())

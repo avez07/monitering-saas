@@ -33,31 +33,84 @@ const forText = (rule) => {
   return m > 0 ? ` for ${m} minute${m === 1 ? '' : 's'}` : '';
 };
 
+const SQL_COLUMN = { cpuPercent: 'cpu_percent', memPercent: 'mem_percent', diskPercent: 'disk_percent' };
+
+/**
+ * One SQL for a rule over all its servers: per agent, the window's first/last sample time, the latest
+ * value, whether every sample breaches, and whether the last minute is entirely clear. Returns a Map
+ * agentId -> aggregate, consumed by `windowedServer`.
+ */
+async function prepareWindowedServer(ctx, rule, subjects, column) {
+  const col = SQL_COLUMN[column];
+  const breach = rule.operator === 'lt' ? `${col} < $5` : `${col} > $5`;
+  const windowMs = rule.durationSeconds * 1000;
+  const rows = await ctx.store.client.$queryRawUnsafe(
+    `SELECT agent_id,
+            min(time) AS first_time,
+            max(time) AS last_time,
+            (array_agg(${col} ORDER BY time DESC))[1] AS last_value,
+            bool_and(${breach}) AS all_breach,
+            bool_and(NOT (${breach})) FILTER (WHERE time >= $4::timestamptz) AS recent_clear
+       FROM server_metrics
+      WHERE agent_id = ANY($1::text[])
+        AND time >= $2::timestamptz AND time <= $3::timestamptz
+        AND ${col} IS NOT NULL
+      GROUP BY agent_id`,
+    subjects.map((s) => s.agent.id),
+    new Date(ctx.now - Math.max(windowMs, MINUTE)),
+    new Date(ctx.now),
+    new Date(ctx.now - MINUTE),
+    rule.threshold,
+  );
+  return new Map(
+    rows.map((r) => [
+      r.agent_id,
+      {
+        firstTime: new Date(r.first_time).getTime(),
+        lastTime: new Date(r.last_time).getTime(),
+        value: r.last_value,
+        allBreach: r.all_breach === true,
+        recentClear: r.recent_clear === true,
+      },
+    ]),
+  );
+}
+
 /** Windowed check over stored server samples: "for 5 minutes" means every sample in the window breaches. */
 async function windowedServer(ctx, rule, subject, column) {
   const test = compare(rule);
   const windowMs = rule.durationSeconds * 1000;
-  const from = new Date(ctx.now - Math.max(windowMs, MINUTE));
-  const rows = await ctx.store.client.serverMetric.findMany({
-    where: {
-      agentId: subject.agent.id,
-      time: { gte: from, lte: new Date(ctx.now) },
-      [column]: { not: null },
-    },
-    orderBy: { time: 'asc' },
-    select: { time: true, [column]: true },
-  });
-  const last = rows.at(-1);
-  if (!last || ctx.now - last.time.getTime() > FRESH_MS) return { fire: null, clear: null, value: null };
-  const value = last[column];
+  let agg = ctx.batch?.get(subject.agent.id);
+  if (!ctx.batch) {
+    // Single-subject fallback (no batch prepared): same aggregates from one agent's rows.
+    const rows = await ctx.store.client.serverMetric.findMany({
+      where: {
+        agentId: subject.agent.id,
+        time: { gte: new Date(ctx.now - Math.max(windowMs, MINUTE)), lte: new Date(ctx.now) },
+        [column]: { not: null },
+      },
+      orderBy: { time: 'asc' },
+      select: { time: true, [column]: true },
+    });
+    if (rows.length) {
+      const recent = rows.filter((r) => r.time.getTime() >= ctx.now - MINUTE);
+      agg = {
+        firstTime: rows[0].time.getTime(),
+        lastTime: rows.at(-1).time.getTime(),
+        value: rows.at(-1)[column],
+        allBreach: rows.every((r) => test(r[column])),
+        recentClear: recent.length > 0 && recent.every((r) => !test(r[column])),
+      };
+    }
+  }
+  if (!agg || ctx.now - agg.lastTime > FRESH_MS) return { fire: null, clear: null, value: null };
+  const value = agg.value;
   // Recovery looks at the latest minute only, so one dip inside the window does not keep an alert open.
-  const recent = rows.filter((r) => r.time.getTime() >= ctx.now - MINUTE);
-  const clear = recent.length > 0 && recent.every((r) => !test(r[column]));
+  const clear = agg.recentClear;
   if (windowMs === 0) return { fire: test(value), clear: !test(value), value };
-  const covered = rows[0].time.getTime() <= ctx.now - windowMs + COVERAGE_MS;
-  const allBreach = rows.every((r) => test(r[column]));
+  const covered = agg.firstTime <= ctx.now - windowMs + COVERAGE_MS;
   // All samples breach but the window is not fully covered yet: not enough evidence either way.
-  return { fire: allBreach ? (covered ? true : null) : false, clear, value };
+  return { fire: agg.allBreach ? (covered ? true : null) : false, clear, value };
 }
 
 function serverMetric(key, label, noun, column, defaults) {
@@ -70,6 +123,7 @@ function serverMetric(key, label, noun, column, defaults) {
     format: pct,
     summary: (rule) =>
       `Alert me when ${noun} is ${rule.operator === 'lt' ? 'below' : 'above'} ${rule.threshold}%${forText(rule)} on ${scopeText(rule, 'server')}.`,
+    prepare: (ctx, rule, subjects) => prepareWindowedServer(ctx, rule, subjects, column),
     evaluate: (ctx, rule, subject) => windowedServer(ctx, rule, subject, column),
   });
 }

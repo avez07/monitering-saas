@@ -53,6 +53,8 @@ export async function recordServices(store, agent, services, { reportedAt, now =
   // Services dropped from the agent's configuration stop being reported; forget them after a while.
   const gone = rows.filter((r) => !seen.has(`${r.kind}:${r.name}`) && now - r.lastSeen.getTime() >= SERVICE_GONE_AFTER_MS);
   if (gone.length) await db.serviceItem.deleteMany({ where: { id: { in: gone.map((g) => g.id) } } });
+  // `pending`: rows the snapshot no longer mentions and that are still waiting to expire.
+  return { pending: rows.some((r) => !seen.has(`${r.kind}:${r.name}`) && !gone.includes(r)) };
 }
 
 export function serviceToApi(s, server) {

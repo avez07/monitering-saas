@@ -65,10 +65,10 @@ test('ingest validates and bounds the containers and services payload', async ()
     (await send(server, { services: Array.from({ length: 101 }, (_, i) => svc({ name: `s${i}` })) })).status,
     400,
   );
-  assert.equal((await send(server, { containers: [container({ name: '/web' })], services: [svc()] })).status, 200);
+  assert.equal((await send(server, { containers: [container({ name: '/web' })], services: [svc()] })).status, 202);
   assert.equal((await store.client.containerItem.findFirst()).name, 'web'); // leading slash stripped
   // Payloads without the new fields still work and leave stored state alone.
-  assert.equal((await send(server)).status, 200);
+  assert.equal((await send(server)).status, 202);
   assert.equal(await store.client.containerItem.count(), 1);
 });
 

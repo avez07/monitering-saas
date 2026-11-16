@@ -1,7 +1,8 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, closeStore, register } from './helpers.js';
-import { enrollServer, registerAgent, ingest, payload, sample } from './agent-helpers.js';
+import { enrollServer, registerAgent, ingest, ingestRaw, payload, sample } from './agent-helpers.js';
+import { drainIngest } from './helpers.js';
 
 let store, app;
 beforeEach(async () => {
@@ -43,33 +44,28 @@ test('ingest skips no-op writes but still reflects status changes and revocation
     }
     return before;
   };
-  assert.equal((await ingest(app, s.credential)).status, 200);
+  assert.equal((await ingest(app, s.credential)).status, 202);
+  // The request path writes nothing to agent or resource rows: the last-seen flush does it in batches.
   const quiet = await countQueries(async () => {
     assert.equal(
       (
-        await ingest(
+        await ingestRaw(
           app,
           s.credential,
           payload([sample({ time: new Date(Date.now() + 1000).toISOString() })]),
         )
       ).status,
-      200,
+      202,
     );
   });
-  assert.deepEqual(
-    quiet,
-    [],
-    'an identical follow-up report changes nothing in agent or resource rows',
+  assert.deepEqual(quiet, [], 'accepting a report changes nothing in agent or resource rows');
+  // A status flip (cpu > 85) is stored when the worker drains and the last-seen flush runs.
+  await ingestRaw(
+    app,
+    s.credential,
+    payload([sample({ cpu: 95, time: new Date(Date.now() + 2000).toISOString() })]),
   );
-  // A status flip (cpu > 85) is written straight away.
-  const hot = await countQueries(async () => {
-    await ingest(
-      app,
-      s.credential,
-      payload([sample({ cpu: 95, time: new Date(Date.now() + 2000).toISOString() })]),
-    );
-  });
-  assert.deepEqual(hot, ['monitoredResource']);
+  await drainIngest();
   const resource = await store.find('monitoredResource', { agentId: s.agentId, type: 'server' });
   assert.equal(resource.status, 'warning');
   // Revocation takes effect on the very next request even though the agent is cached.

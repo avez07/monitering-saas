@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { digest } from '../src/lib/crypto.js';
+import { drainIngest } from './helpers.js';
 
 export const fp = (n) => digest(`b1-machine-${n}`);
 export const bearer = (value) => ({ Authorization: `Bearer ${value}` });
@@ -56,8 +57,15 @@ export const payload = (samples = [sample()], extra = {}) => ({
   errors: [],
   ...extra,
 });
-export const ingest = (app, credential, body = payload()) =>
+/** POST /v1/ingest exactly as an agent would; nothing is stored until a worker runs (see drainIngest). */
+export const ingestRaw = (app, credential, body = payload()) =>
   request(app).post('/v1/ingest').set(bearer(credential)).send(body);
+/** Like ingestRaw, but when the report was accepted (202) the workers drain it before returning. */
+export async function ingest(app, credential, body = payload()) {
+  const response = await ingestRaw(app, credential, body);
+  if (response.status === 202) await drainIngest();
+  return response;
+}
 
 export async function setPlan(store, owner, planId) {
   const subscription = await store.find('subscription', { orgId: owner.orgId });

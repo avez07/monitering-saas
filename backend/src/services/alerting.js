@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { metricSources, templates, DEFAULT_TEMPLATE_KEYS, normalizeRule, ruleSummary } from './alert-metrics.js';
 import { ensureResource } from './checks.js';
+import { enqueueDelivery } from '../queues/notify.js';
 
 export const RECOVERY_MS = 60000; // an alert only closes after the problem stayed gone this long
 const OPEN = ['pending', 'firing', 'acknowledged'];
@@ -122,8 +123,8 @@ export async function enqueueNotifications(store, incident, { rule, detail, reco
     message: body,
     url: `${config.APP_URL}/alerts`,
   };
-  for (const channel of channels)
-    await store.create('notificationDelivery', {
+  for (const channel of channels) {
+    const delivery = await store.create('notificationDelivery', {
       orgId: incident.orgId,
       incidentId: incident.id,
       channelId: channel.id,
@@ -135,6 +136,12 @@ export async function enqueueNotifications(store, incident, { rule, detail, reco
       attempts: 0,
       nextAttemptAt: new Date(now),
     });
+    // The outbox row is the source of truth; the job (jobId = delivery id) only triggers sending. If
+    // Redis hiccups here, the housekeeping sweep queues any row that stays pending.
+    await enqueueDelivery(delivery).catch((error) =>
+      console.error('notify: could not queue delivery', delivery.id, error.message),
+    );
+  }
   return channels.length;
 }
 
@@ -184,12 +191,22 @@ export async function evaluateAlerts(store, orgId, { now = Date.now() } = {}) {
     for (const rule of rules.filter((r) => r.orgId === id)) {
       const source = metricSources.get(rule.metric);
       if (!source) continue;
-      for (const subject of subjects[source.kind].filter((s) => inScope(rule, s))) {
+      const scoped = subjects[source.kind].filter((s) => inScope(rule, s));
+      // One SQL per rule over every subject (window aggregates), instead of one query per subject.
+      let rctx = ctx;
+      if (source.prepare && scoped.length) {
+        try {
+          rctx = { ...ctx, batch: await source.prepare(ctx, rule, scoped) };
+        } catch (error) {
+          console.error(`Alert ${rule.metric} (batch):`, error.message); // falls back to per-subject queries
+        }
+      }
+      for (const subject of scoped) {
         const key = `${rule.id}:${subject.resource.id}`;
         kept.add(key);
         let result;
         try {
-          result = await source.evaluate(ctx, rule, subject);
+          result = await source.evaluate(rctx, rule, subject);
         } catch (error) {
           console.error(`Alert ${rule.metric}:`, error.message);
           continue;

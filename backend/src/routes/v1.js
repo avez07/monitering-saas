@@ -10,17 +10,11 @@ import { registerServer } from '../services/agents.js';
 import { CONFIG_ID, configForAgent } from '../services/agent-config.js';
 import { recordEvent, recordDeduped, trimEvents } from '../services/agent-events.js';
 import { digest } from '../lib/crypto.js';
-import { insertSamples, sampleToRow } from '../services/metrics.js';
-import { recordContainers, trimStateEvents } from '../services/containers.js';
-import { recordServices, SERVICE_KINDS, SERVICE_STATES } from '../services/services.js';
+import { SERVICE_KINDS, SERVICE_STATES } from '../services/services.js';
+import { enqueueIngest } from '../queues/ingest.js';
+import { ingestOverloaded } from '../queues/ingest-queues.js';
 
 const FINGERPRINT = /^[a-f0-9]{64}$/;
-const BACKFILL_WINDOW_MS = 30 * 60000; // samples buffered through an outage may be up to 30 minutes old
-const FUTURE_TOLERANCE_MS = 60000;
-const CLOCK_SKEW_MS = 120000; // beyond this, treat the agent's clock as wrong and correct its timestamps
-const LAST_SEEN_EVERY_MS = 25000;
-const SNAPSHOT_EVERY_MS = 60000;
-const SKEW_EVENT_EVERY_MS = 10 * 60000;
 
 const percent = z.number().min(0).max(100);
 const rate = z.number().min(0).max(1e13);
@@ -230,134 +224,17 @@ export function v1Routes(store, limits) {
     await limits.use(`ingest:${agent.id}`, 1, 30, 60);
     const input = ingestBody.parse(req.body);
     assert(resource && !resource.deletedAt, 403, 'This server was removed from your account.');
+    // Backpressure: when the workers are far behind, ask the agent to wait. It keeps buffering (15 minutes)
+    // and backs off, so nothing is lost.
+    if (await ingestOverloaded())
+      return res
+        .status(503)
+        .set('Retry-After', String(10 + Math.floor(Math.random() * 11)))
+        .json({ error: 'The service is busy. Try again shortly.' });
     const now = Date.now();
-    const offset = now - new Date(input.sentAt).getTime();
-    const skewed = Math.abs(offset) > CLOCK_SKEW_MS;
-    // A wrong clock on the server must not lose its data: shift its timestamps by the measured offset.
-    const rows = [];
-    let dropped = 0;
-    for (const s of input.samples) {
-      const time = new Date(new Date(s.time).getTime() + (skewed ? offset : 0));
-      if (time.getTime() < now - BACKFILL_WINDOW_MS || time.getTime() > now + FUTURE_TOLERANCE_MS) {
-        dropped++;
-        continue;
-      }
-      rows.push({ sample: s, row: sampleToRow(agent.orgId, agent.id, s, time) });
-    }
-    const accepted = await insertSamples(
-      store,
-      rows.map((r) => r.row),
-    );
-
-    // Container and service snapshots describe "now"; they are stamped with the (clock-corrected) send time.
-    const reportedAt = new Date(
-      Math.min(new Date(input.sentAt).getTime() + (skewed ? offset : 0), now),
-    );
-    if (input.containers)
-      await recordContainers(store, agent, input.containers, { reportedAt, now });
-    if (input.services) await recordServices(store, agent, input.services, { reportedAt, now });
-    if (input.containers || input.services) await trimStateEvents(store, agent.id, now);
-
-    const newest = rows.reduce((a, b) => (b.row.time > a.row.time ? b : a), rows[0]);
-    const first = agent.status === 'pending';
-    // Skip writes that would change nothing: lastSeen is refreshed at most every LAST_SEEN_EVERY_MS
-    // (well inside the 90 second online window), and everything else only when it actually differs.
-    const wrote = cached.wrote;
-    const agentSig = `${input.agent.version}|${input.agent.os}|${input.agent.arch}`;
-    if (first || agentSig !== wrote.agentSig || now - wrote.agentAt >= LAST_SEEN_EVERY_MS) {
-      const fresh = await store.client.agent.update({
-        where: { id: agent.id },
-        data: {
-          status: 'healthy',
-          lastSeen: new Date(now),
-          version: input.agent.version,
-          os: input.agent.os,
-          arch: input.agent.arch,
-        },
-      });
-      Object.assign(agent, { status: fresh.status, lastSeen: fresh.lastSeen });
-      wrote.agentAt = now;
-      wrote.agentSig = agentSig;
-    }
-    if (newest) {
-      const s = newest.sample;
-      const snapshot = Object.fromEntries(
-        Object.entries({
-          cpu: s.cpu,
-          memory: s.memory,
-          disk: s.disk,
-          uptimeSeconds: s.uptimeSeconds,
-          cores: input.agent.cores,
-          ramGb: input.agent.ramBytes ? +(input.agent.ramBytes / 1024 ** 3).toFixed(2) : undefined,
-          os: input.agent.os || undefined,
-        }).filter(([, v]) => v !== undefined),
-      );
-      const labels = { ...resource.labels, ...snapshot };
-      const status = labels.cpu > 85 || labels.memory > 90 ? 'warning' : 'healthy';
-      // The live snapshot changes every report, so it is stored at most once a minute unless the status flips.
-      if (
-        status !== resource.status ||
-        now - wrote.resourceAt >= SNAPSHOT_EVERY_MS ||
-        wrote.resourceAt === 0
-      ) {
-        const fresh = await store.client.monitoredResource.update({
-          where: { id: resource.id },
-          data: { labels, status },
-        });
-        Object.assign(resource, { labels: fresh.labels, status: fresh.status });
-        wrote.resourceAt = now;
-      }
-    }
-
-    // Agents repeat the same error on every send; keep one event per code every few minutes.
-    let events = 0;
-    for (const e of input.errors)
-      if (
-        await recordDeduped(store, {
-          orgId: agent.orgId,
-          agentId: agent.id,
-          source: 'agent',
-          code: e.code,
-          message: e.message,
-        })
-      )
-        events++;
-    if (skewed) {
-      const recent = await store.client.agentEvent.findFirst({
-        where: {
-          agentId: agent.id,
-          code: 'clock_skew',
-          createdAt: { gt: new Date(now - SKEW_EVENT_EVERY_MS) },
-        },
-      });
-      if (!recent) {
-        events++;
-        await recordEvent(store, {
-          orgId: agent.orgId,
-          agentId: agent.id,
-          source: 'server',
-          code: 'clock_skew',
-          message: `The server clock is about ${Math.round(Math.abs(offset) / 1000)} seconds ${offset > 0 ? 'behind' : 'ahead of'} real time.`,
-          details: { offsetSeconds: Math.round(offset / 1000) },
-        });
-      }
-    }
-    if (first)
-      await recordEvent(store, {
-        orgId: agent.orgId,
-        agentId: agent.id,
-        source: 'server',
-        code: 'first_data',
-        message: 'First data received.',
-      }).then(() => events++);
-    if (events) await trimEvents(store, agent.id);
-
-    res.json({
-      accepted,
-      dropped,
-      config: configInfo(setup),
-      serverTime: new Date(now).toISOString(),
-    });
+    // No database work here: the report is validated, queued (gzipped) and answered. Workers store it.
+    await enqueueIngest({ agent, input, now, first: agent.status === 'pending' });
+    res.status(202).json({ configVersion: setup.version, serverTime: new Date(now).toISOString() });
   });
 
   router.use((req, res) => res.status(404).json({ error: 'Unknown agent endpoint.' }));

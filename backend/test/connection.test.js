@@ -51,7 +51,7 @@ test('a freshly registered server is waiting, not failed', async () => {
 test('once data flows every step is done and the age of the data is shown', async () => {
   const owner = await register(app, 'Flow');
   const s = await enrollServer(app, owner);
-  assert.equal((await ingest(app, s.credential)).status, 200);
+  assert.equal((await ingest(app, s.credential)).status, 202);
   const c = await connection(owner, s.agentId);
   assert.equal(c.overall, 'connected');
   for (const key of ['install_started', 'registered', 'running', 'data', 'problems'])
@@ -128,7 +128,7 @@ test('agent-reported errors are stored once and explained with plain-language fi
     { code: 'brand_new_code', message: 'who knows' },
   ];
   // The agent repeats its errors on every send; that must not multiply the events.
-  for (let i = 0; i < 3; i++) assert.equal((await ingest(app, s.credential, payload([sample()], { errors }))).status, 200);
+  for (let i = 0; i < 3; i++) assert.equal((await ingest(app, s.credential, payload([sample()], { errors }))).status, 202);
   const c = await connection(owner, s.agentId);
   assert.equal(c.overall, 'problem');
   assert.equal(step(c, 'problems').state, 'failed');
@@ -147,7 +147,7 @@ test('a clock that is far off is detected and explained', async () => {
   const s = await enrollServer(app, owner);
   const skewed = new Date(Date.now() - 7 * 60000).toISOString();
   const r = await ingest(app, s.credential, payload([sample({ time: skewed })], { sentAt: skewed }));
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 202);
   const c = await connection(owner, s.agentId);
   const e = c.events.find((x) => x.code === 'clock_skew');
   assert.ok(e);

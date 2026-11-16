@@ -19,15 +19,27 @@ export async function allowedContactTypes(store, orgId) {
 
 // ---- Outbound transports (replaceable in tests so nothing touches the network) ----------------------
 
-const defaultEmail = async ({ to, subject, text }) => {
-  if (config.EMAIL_PROVIDER !== 'smtp') return 'local';
-  const smtp = nodemailer.createTransport({
+let smtp = null;
+/** One pooled SMTP transport per process: delivery jobs reuse connections instead of reconnecting. */
+function smtpTransport() {
+  smtp ??= nodemailer.createTransport({
     host: config.SMTP_HOST,
     port: config.SMTP_PORT,
     secure: config.SMTP_PORT === 465,
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
     ...(config.SMTP_USER ? { auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD } } : {}),
   });
-  await smtp.sendMail({ from: config.EMAIL_FROM, to, subject, text });
+  return smtp;
+}
+export function closeSmtp() {
+  smtp?.close();
+  smtp = null;
+}
+const defaultEmail = async ({ to, subject, text }) => {
+  if (config.EMAIL_PROVIDER !== 'smtp') return 'local';
+  await smtpTransport().sendMail({ from: config.EMAIL_FROM, to, subject, text });
   return 'delivered';
 };
 /** JSON POST through the SSRF guard: public addresses only, no redirects. */
@@ -235,36 +247,52 @@ export async function testContact(store, channel) {
   return ok ? { ok: true } : { ok: false, error };
 }
 
-/** Send every due, pending delivery. `now` is injectable for tests. */
+export const MAX_DELIVERY_ATTEMPTS = 5;
+
+/**
+ * Make one delivery attempt and record it. Returns { ok, status, error }; status is 'delivered', 'local',
+ * 'pending' (will retry) or 'failed' (dead-lettered after 5 attempts; visible as the outbox status).
+ */
+export async function attemptDelivery(store, delivery, channel = delivery.channel, now = Date.now()) {
+  try {
+    const outcome = await sendToContact(channel, {
+      subject: delivery.subject,
+      text: delivery.body,
+      payload: delivery.payload,
+    });
+    const status = outcome === 'local' ? 'local' : 'delivered';
+    await store.update('notificationDelivery', delivery.id, {
+      status,
+      attempts: delivery.attempts + 1,
+      deliveredAt: new Date(now),
+      error: null,
+    });
+    return { ok: true, status };
+  } catch (error) {
+    const attempts = delivery.attempts + 1;
+    const status = attempts >= MAX_DELIVERY_ATTEMPTS ? 'failed' : 'pending';
+    const message = plainError(error);
+    await store.update('notificationDelivery', delivery.id, {
+      attempts,
+      status,
+      error: message,
+      nextAttemptAt: new Date(now + Math.min(3600, 30 * 2 ** attempts) * 1000),
+    });
+    return { ok: false, status, error: message };
+  }
+}
+
+/**
+ * Send every due, pending delivery in one pass (a deterministic sweep for tests and manual flows; the
+ * notify queue does the same one delivery per job). `now` is injectable for tests.
+ */
 export async function deliverNotifications(store, orgId, { now = Date.now() } = {}) {
   const pending = await store.client.notificationDelivery.findMany({
     where: { status: 'pending', nextAttemptAt: { lte: new Date(now) }, ...(orgId ? { orgId } : {}) },
     include: { channel: true },
     take: 500,
   });
-  for (const delivery of pending) {
-    try {
-      const outcome = await sendToContact(delivery.channel, {
-        subject: delivery.subject,
-        text: delivery.body,
-        payload: delivery.payload,
-      });
-      await store.update('notificationDelivery', delivery.id, {
-        status: outcome === 'local' ? 'local' : 'delivered',
-        attempts: delivery.attempts + 1,
-        deliveredAt: new Date(now),
-        error: null,
-      });
-    } catch (error) {
-      const attempts = delivery.attempts + 1;
-      await store.update('notificationDelivery', delivery.id, {
-        attempts,
-        status: attempts >= 5 ? 'failed' : 'pending',
-        error: plainError(error),
-        nextAttemptAt: new Date(now + Math.min(3600, 30 * 2 ** attempts) * 1000),
-      });
-    }
-  }
+  for (const delivery of pending) await attemptDelivery(store, delivery, delivery.channel, now);
 }
 
 /** Point Telegram at our webhook (best effort at worker start; needs a public https API address). */

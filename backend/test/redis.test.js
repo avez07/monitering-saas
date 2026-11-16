@@ -54,8 +54,8 @@ test('revoking a server on instance A takes effect on instance B immediately', a
   const owner = await register(a.app, 'Revoke');
   const s = await enrollServer(a.app, owner);
   // Warm B's cache.
-  assert.equal((await ingest(b.app, s.credential)).status, 200);
-  assert.equal((await ingest(b.app, s.credential)).status, 200);
+  assert.equal((await ingest(b.app, s.credential)).status, 202);
+  assert.equal((await ingest(b.app, s.credential)).status, 202);
   assert.equal((await owner.client.delete(`/api/servers/${s.agentId}`)).status, 204);
   assert.equal((await ingest(b.app, s.credential)).status, 401);
   assert.equal((await ingest(a.app, s.credential)).status, 401);

@@ -74,7 +74,7 @@ test('rename and per-server config use a private copy of the shared profile and 
   assert.equal(again.config.version, edited.config.version + 1);
   // The agent sees it on its next call.
   const pulled = await ingest(app, s.credential);
-  assert.equal(pulled.body.config.id, edited.config.id);
+  assert.equal(pulled.body.configVersion, again.config.version, 'the agent is told the version to pull');
 
   assert.equal(
     (await owner.client.patch(`/api/servers/${s.agentId}`).send({ config: { sendIntervalSeconds: 5 } })).status,

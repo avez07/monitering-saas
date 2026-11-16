@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import request from 'supertest';
 import { digest } from '../src/lib/crypto.js';
 import { insertSamples, trimRawMetricsByPlan } from '../src/services/metrics.js';
-import { setup, closeStore, register, addMember } from './helpers.js';
+import { setup, closeStore, register, addMember, drainIngest } from './helpers.js';
 
 let store, app;
 beforeEach(async () => {
@@ -48,8 +48,14 @@ const body = (samples = [sample()], extra = {}) => ({
   errors: [],
   ...extra,
 });
-const ingest = (credential, payload = body()) =>
+const ingestRaw = (credential, payload = body()) =>
   request(app).post('/v1/ingest').set(bearer(credential)).send(payload);
+/** Accepted reports (202) are drained by the in-process worker before the test looks at the database. */
+const ingest = async (credential, payload = body()) => {
+  const response = await ingestRaw(credential, payload);
+  if (response.status === 202) await drainIngest();
+  return response;
+};
 const upgrade = async (owner, planId) => {
   const subscription = await store.find('subscription', { orgId: owner.orgId });
   await store.update('subscription', subscription.id, { planId });
@@ -93,9 +99,9 @@ test('regenerating or revoking the key leaves connected servers running unless a
   const key = await createKey(owner);
   const server = (await enroll(key, 1)).body;
   await owner.client.post('/api/api-key/regenerate');
-  assert.equal((await ingest(server.credential)).status, 200, 'existing servers keep reporting');
+  assert.equal((await ingest(server.credential)).status, 202, 'existing servers keep reporting');
   await owner.client.delete('/api/api-key');
-  assert.equal((await ingest(server.credential)).status, 200, 'revoking alone does not disconnect');
+  assert.equal((await ingest(server.credential)).status, 202, 'revoking alone does not disconnect');
 
   const next = (await owner.client.post('/api/api-key')).body.key;
   const second = (await enroll(next, 2)).body;
@@ -164,7 +170,7 @@ test('registering the same machine again reconnects the same server and replaces
     1,
   );
   assert.equal((await ingest(first.body.credential)).status, 401, 'the old credential is replaced');
-  assert.equal((await ingest(second.body.credential)).status, 200);
+  assert.equal((await ingest(second.body.credential)).status, 202);
 
   // Several installs of one machine at once still leave one server and one working credential.
   await Promise.all([1, 2, 3].map(() => enroll(key, 1)));
@@ -216,10 +222,9 @@ test('ingest needs a server credential, stores samples, and updates the server r
   assert.equal((await ingest('agent_' + 'a'.repeat(64))).status, 401);
 
   const first = await ingest(server.credential, body([sample({ cpu: 40, memory: 50, swap: 3 })]));
-  assert.equal(first.status, 200, first.text);
-  assert.equal(first.body.accepted, 1);
-  assert.equal(first.body.dropped, 0);
-  assert.equal(first.body.config.id, server.config.id);
+  assert.equal(first.status, 202, first.text);
+  assert.equal(first.body.configVersion, server.config.version, 'the version the agent tracks');
+  assert.ok(first.body.serverTime);
   const [row] = await metricRows(server.agentId);
   assert.equal(row.cpuPercent, 40);
   assert.equal(row.memPercent, 50);
@@ -239,7 +244,7 @@ test('ingest needs a server credential, stores samples, and updates the server r
   assert.ok(events.some((e) => e.code === 'first_data'));
 
   const hot = await ingest(server.credential, body([sample({ cpu: 95 })]));
-  assert.equal(hot.status, 200);
+  assert.equal(hot.status, 202);
   assert.equal((await store.find('monitoredResource', { id: resource.id })).status, 'warning');
 });
 
@@ -261,10 +266,10 @@ test('ingest accepts gzip, ignores re-sent batches, back-fills buffered samples 
     .set('Content-Encoding', 'gzip')
     .serialize((data) => data) // superagent would otherwise JSON-encode the Buffer
     .send(gzipSync(JSON.stringify(payload)));
-  assert.equal(compressed.status, 200, compressed.text);
-  assert.deepEqual([compressed.body.accepted, compressed.body.dropped], [2, 2]);
+  assert.equal(compressed.status, 202, compressed.text);
+  await drainIngest(); // 2 stored, 2 dropped (too old / too far ahead)
   const again = await ingest(server.credential, payload);
-  assert.equal(again.body.accepted, 0, 're-sending the same batch adds nothing');
+  assert.equal(again.status, 202, 're-sending the same batch adds nothing');
   assert.deepEqual(
     (await metricRows(server.agentId)).map((r) => r.cpuPercent).sort((a, b) => a - b),
     [10, 11],
@@ -301,7 +306,7 @@ test('a wrong server clock is corrected and reported; agent errors are kept as e
       errors: [{ code: 'disk_permission', message: 'cannot read /var' }],
     }),
   );
-  assert.equal(skewed.body.accepted, 1);
+  assert.equal(skewed.status, 202);
   const [row] = await metricRows(server.agentId);
   assert.ok(Math.abs(row.time.getTime() - Date.now()) < 30000, 'stored on the server timeline');
   const events = await store.list('agentEvent', { agentId: server.agentId });
@@ -346,7 +351,7 @@ test('a revoked, rotated or removed server is rejected immediately', async () =>
   const key = await createKey(owner);
   const one = (await enroll(key, 1)).body;
   const two = (await enroll(key, 2)).body;
-  assert.equal((await ingest(one.credential)).status, 200);
+  assert.equal((await ingest(one.credential)).status, 202);
 
   await owner.client.post(`/api/agents/${one.agentId}/revoke`);
   assert.equal((await ingest(one.credential)).status, 401);
@@ -360,7 +365,7 @@ test('a revoked, rotated or removed server is rejected immediately', async () =>
   const rotated = await owner.client.post(`/api/agents/${two.agentId}/rotate`);
   assert.equal(rotated.status, 200);
   assert.equal((await ingest(two.credential)).status, 401);
-  assert.equal((await ingest(rotated.body.token)).status, 200);
+  assert.equal((await ingest(rotated.body.token)).status, 202);
 
   // Deleting a server from the dashboard also stops its agent.
   const resource = await store.find('monitoredResource', { agentId: two.agentId });
@@ -411,7 +416,7 @@ test('setup profiles are created per organization, pulled by the agent, and vali
   assert.equal(ok.body.settings.collectors.processes, false);
   assert.equal(ok.body.settings.collectors.cpu, true);
   // The agent learns about the change from its next send.
-  assert.equal((await ingest(server.credential)).body.config.version, 2);
+  assert.equal((await ingest(server.credential)).body.configVersion, 2);
   assert.equal(
     (await request(app).get('/v1/config').set(bearer(server.credential))).body.settings
       .sendIntervalSeconds,

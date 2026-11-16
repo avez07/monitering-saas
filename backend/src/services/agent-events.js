@@ -1,3 +1,5 @@
+import { getRedis } from '../lib/redis.js';
+
 export const MAX_EVENTS_PER_AGENT = 50;
 
 /** Record something the connection page should be able to show (install step, agent error, ...). */
@@ -31,21 +33,18 @@ export const DEDUPE_MS = 5 * 60000;
  * one, the same install fingerprint) in the last few minutes, so a flapping agent cannot flood the log.
  */
 export async function recordDeduped(store, event, windowMs = DEDUPE_MS) {
-  const who = event.agentId
-    ? { agentId: event.agentId }
-    : { agentId: null, fingerprint: event.fingerprint ?? null };
-  const recent = await store.client.agentEvent.findFirst({
-    where: {
-      orgId: event.orgId,
-      code: event.code,
-      source: event.source,
-      createdAt: { gt: new Date(Date.now() - windowMs) },
-      ...who,
-    },
-    select: { id: true },
-  });
-  if (recent) return null;
-  const row = await recordEvent(store, event);
-  if (event.agentId) await trimEvents(store, event.agentId);
-  return row;
+  // One Redis SET NX per (server or fingerprint, source, code) replaces a findFirst on every report.
+  const who = event.agentId ? `a:${event.agentId}` : `f:${event.fingerprint ?? ''}`;
+  const key = `dedupe:${event.orgId}:${who}:${event.source}:${event.code}`;
+  const redis = getRedis();
+  const acquired = await redis.set(key, '1', 'PX', windowMs, 'NX');
+  if (!acquired) return null;
+  try {
+    const row = await recordEvent(store, event);
+    if (event.agentId) await trimEvents(store, event.agentId);
+    return row;
+  } catch (error) {
+    await redis.del(key).catch(() => {}); // nothing was recorded, so let the next report try again
+    throw error;
+  }
 }

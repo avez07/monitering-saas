@@ -93,11 +93,13 @@ Symptoms: `df -h` shows the Docker volume above 90 percent, Postgres logs `No sp
 
 Symptoms: no new `lastCheckedAt` on website monitors, no alert emails, `worker` logs silent.
 
-1. `dcp ps worker` and `dcp logs --tail=100 worker`. The worker holds a database lease so only one runs at a time; a stale
-   lease from a crashed worker expires on its own after a short period.
-2. Crash loop: read the stack trace (often the database or SMTP). `dcp restart worker`.
-3. Running but doing nothing (lease held elsewhere): make sure only one worker exists (`docker ps | grep worker`), then
-   `dcp restart worker`. Look at the lease row in the database if present (`select * from "WorkerLease";`, table name per schema) and wait one lease period.
+1. `dcp ps worker` and `dcp logs --tail=100 worker`. Workers run by role (`node src/worker.js --role=checks|alerts|notify|housekeeping|all`)
+   on BullMQ queues in Redis; any number can run and each scheduled job runs once. `curl localhost:9100/healthz` (all) or
+   9101-9104 (checks, alerts, notify, housekeeping) shows the Redis connection, queue counts and the last processed time.
+2. Crash loop: read the stack trace (often the database, Redis or SMTP). `dcp restart worker`.
+3. Running but doing nothing: check Redis is up (`redis-cli ping`) and that `/healthz` reports queue counts. Waiting jobs that
+   never drain mean no worker serves that role; start one. Failed notification jobs (5 attempts used) are the dead letters:
+   their outbox rows have status `failed`.
 4. Long-running job (slow query): in psql `select pid, now()-query_start as age, state, left(query,100) from pg_stat_activity where datname=current_database() order by age desc limit 10;`
    and `select pg_cancel_backend(<pid>);` for a runaway query.
 5. Email stuck: check `SMTP_HOST` credentials (`dcp logs worker | grep -i smtp`); test from the relay's dashboard. Rotate

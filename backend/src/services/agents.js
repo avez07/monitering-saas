@@ -123,7 +123,14 @@ async function countAgainstPlan(tx, orgId) {
 export async function registerServer(store, key, input) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await store.transaction((tx) => registerOnce(tx, key, input));
+      const result = await store.transaction((tx) => registerOnce(tx, key, input));
+      try {
+        const { touchLastSeen } = await import('../queues/ingest.js');
+        await touchLastSeen(result.agent.id, Date.now());
+      } catch {
+        /* Redis hiccup: the offline sweep falls back to the database */
+      }
+      return result;
     } catch (error) {
       // Two installs racing (same machine, or both taking the last free slot): retry on the new state.
       if (attempt < 5 && ['P2002', 'P2034'].includes(error.code)) continue;

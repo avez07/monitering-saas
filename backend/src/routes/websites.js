@@ -5,6 +5,7 @@ import { canEdit, audit } from '../services/auth.js';
 import { enforceCount, entitlements } from '../services/limits.js';
 import { resolveTarget } from '../services/uptime.js';
 import { registrableDomain } from '../services/rdap.js';
+import { trySyncMonitor, tryRemoveMonitor } from '../queues/checks.js';
 import {
   runCheck,
   recordCheckResult,
@@ -219,6 +220,7 @@ export function websiteRoutes(store, limits) {
       ...cols,
     });
     await ensureResource(store, monitor, null);
+    await trySyncMonitor(monitor, { immediate: true });
     await audit(store, req.context, 'website.created', monitor.name);
     res.status(201).json(present(monitor));
   });
@@ -237,6 +239,7 @@ export function websiteRoutes(store, limits) {
     if (input.intervalSeconds) await assertPlan(org(req), input.intervalSeconds);
     const cols = await toColumns(input, monitor);
     const row = await store.update('uptimeMonitor', monitor.id, { ...cols, nextCheckAt: new Date() });
+    await trySyncMonitor(row, { immediate: true });
     if (cols.name) {
       const resource = await store.find('monitoredResource', { orgId: org(req), externalId: monitor.id });
       if (resource) await store.update('monitoredResource', resource.id, { name: cols.name });
@@ -249,17 +252,22 @@ export function websiteRoutes(store, limits) {
     // Keep the resource row (soft delete) so incident history still has a name to show.
     await store.updateMany('monitoredResource', { orgId: org(req), externalId: monitor.id }, { deletedAt: new Date() });
     await store.remove('uptimeMonitor', monitor.id);
+    await tryRemoveMonitor(monitor.id);
     await audit(store, req.context, 'website.deleted', monitor.name);
     res.status(204).end();
   });
 
   router.post('/websites/:id/pause', canEdit, async (req, res) => {
     const monitor = await requireMonitor(req);
-    res.json(present(await store.update('uptimeMonitor', monitor.id, { enabled: false })));
+    const row = await store.update('uptimeMonitor', monitor.id, { enabled: false });
+    await trySyncMonitor(row);
+    res.json(present(row));
   });
   router.post('/websites/:id/resume', canEdit, async (req, res) => {
     const monitor = await requireMonitor(req);
-    res.json(present(await store.update('uptimeMonitor', monitor.id, { enabled: true, nextCheckAt: new Date() })));
+    const row = await store.update('uptimeMonitor', monitor.id, { enabled: true, nextCheckAt: new Date() });
+    await trySyncMonitor(row, { immediate: true });
+    res.json(present(row));
   });
 
   router.post('/websites/:id/check', canEdit, async (req, res) => {

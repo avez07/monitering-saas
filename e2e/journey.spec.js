@@ -171,7 +171,7 @@ test('the Connection tab explains each state: connected, waiting, problem and si
     second.body.credential,
     sampleBody(30, [{ code: 'docker_socket_denied', message: 'permission denied' }]),
   );
-  expect(sent.status).toBe(200);
+  expect(sent.status).toBe(202);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'There is a problem' })).toBeVisible();
   await expect(page.getByText('Problems to fix')).toBeVisible();

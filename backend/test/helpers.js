@@ -10,6 +10,10 @@ import './redis-url.js'; // routes every Redis user in this process to the test 
 import { getRedis, closeRedis } from '../src/lib/redis.js';
 import { resetAgentCache, closeAgentCache } from '../src/services/agent-cache.js';
 import { useMemoryMail } from '../src/services/mail.js';
+import { drainIngest as drainQueues, resetIngestRuntime } from '../src/queues/ingest.js';
+import { closeIngestQueues, setBackpressure } from '../src/queues/ingest-queues.js';
+import { closeQueues } from '../src/queues/factory.js';
+import { closeSmtp } from '../src/services/contacts.js';
 
 export const PASSWORD = 'correct-horse-battery';
 let counter = 0;
@@ -18,8 +22,19 @@ const extra = [];
 
 /** Empty the test Redis DB (limits, caches, epochs) and drop in-process agent caches. */
 export async function flushRedis() {
+  await resetIngestRuntime(); // the in-process ingest worker must not outlive the data it was reading
   await getRedis().flushdb();
   resetAgentCache();
+  setBackpressure({ maxWaiting: 50000, maxLagMs: 60000 });
+}
+
+/**
+ * Process everything queued by /v1/ingest so far (rows, container state, events), then flush last-seen
+ * times to Postgres. Call it after an ingest request before reading the database or the API.
+ */
+export function drainIngest() {
+  if (!shared) throw new Error('drainIngest() needs setup() to have run.');
+  return drainQueues(shared);
 }
 
 /** Fresh store + app on the test database, with every table emptied and plans seeded; Redis is flushed too. */
@@ -96,8 +111,12 @@ export async function addMember(app, store, owner, { role, projectIds = [] }) {
 
 export async function closeStore() {
   await Promise.all(extra.splice(0).map((s) => s.close()));
+  await resetIngestRuntime();
+  await closeIngestQueues();
   await shared?.close();
   shared = undefined;
   await closeAgentCache();
+  await closeQueues(); // BullMQ queues/workers opened by routes or tests
+  closeSmtp();
   await closeRedis();
 }

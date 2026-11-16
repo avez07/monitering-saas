@@ -36,13 +36,19 @@ export async function trimStateEvents(store, agentId, now = Date.now()) {
  * Apply one container snapshot from an agent. `reportedAt` is the snapshot time; a snapshot that is not
  * newer than what a row already holds is ignored, so a retried request cannot count twice.
  */
-export async function recordContainers(store, agent, containers, { reportedAt, now = Date.now() }) {
+export async function recordContainers(
+  store,
+  agent,
+  containers,
+  { reportedAt, now = Date.now(), insertMetrics = true },
+) {
   const db = store.client;
   const at = new Date(now);
   const rows = await db.containerItem.findMany({ where: { agentId: agent.id } });
   const byName = new Map(rows.map((r) => [r.name, r]));
   const seen = new Set();
   const metrics = [];
+  const ids = {};
   const base = { orgId: agent.orgId, agentId: agent.id };
 
   for (const c of new Map(containers.map((x) => [x.name, x])).values()) {
@@ -85,6 +91,7 @@ export async function recordContainers(store, agent, containers, { reportedAt, n
         message: `Container ${c.name} appeared (${state}).`,
       });
     } else {
+      ids[c.name] = existing.id;
       if (existing.reportedAt >= reportedAt) continue;
       const changed = existing.state !== state;
       const event = (type, message) =>
@@ -108,6 +115,7 @@ export async function recordContainers(store, agent, containers, { reportedAt, n
         },
       });
     }
+    ids[c.name] = item.id;
     if (state !== 'stopped' || c.cpuPercent != null || c.memoryBytes != null)
       metrics.push({
         time: reportedAt,
@@ -140,7 +148,12 @@ export async function recordContainers(store, agent, containers, { reportedAt, n
   await db.containerItem.deleteMany({
     where: { agentId: agent.id, state: 'removed', lastSeen: { lt: new Date(now - REMOVED_KEEP_MS) } },
   });
-  if (metrics.length) await db.containerMetric.createMany({ data: metrics, skipDuplicates: true });
+  if (insertMetrics && metrics.length)
+    await db.containerMetric.createMany({ data: metrics, skipDuplicates: true });
+  // With insertMetrics: false the caller batches the rows; `ids` maps container name to row id.
+  // `pending`: rows the snapshot no longer mentions (waiting to be marked removed or deleted), so the
+  // caller must keep applying snapshots instead of skipping unchanged ones.
+  return { metrics, ids, pending: rows.some((r) => !seen.has(r.name)) };
 }
 
 /** Plans with shorter history than the raw retention policy (8 days) get older container samples removed. */

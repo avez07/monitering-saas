@@ -1,124 +1,104 @@
-import { hostname } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { config } from '../config.js';
-import { entitlements } from './limits.js';
-import { trimRawMetricsByPlan } from './metrics.js';
 import { runDueChecks } from './checks.js';
-import { refreshDomainExpiry } from './rdap.js';
 import { evaluateAlerts } from './alerting.js';
-import { deliverNotifications } from './contacts.js';
-import { trimContainerMetricsByPlan } from './containers.js';
-import { runDunning } from './billing.js';
+import { deliverNotifications, closeSmtp } from './contacts.js';
+import { housekeeping } from './housekeeping-steps.js';
+import { closeQueues, stopWorker, queueStatus, queueConnected } from '../queues/factory.js';
+import { startChecksWorker, reconcileMonitors, CHECKS_QUEUE } from '../queues/checks.js';
+import { startAlertsWorker, startAlertsScheduler, ALERTS_QUEUE } from '../queues/alerts.js';
+import { startNotifyWorker, NOTIFY_QUEUE } from '../queues/notify.js';
+import {
+  startHousekeepingWorker,
+  startHousekeepingSchedulers,
+  HOUSEKEEPING_QUEUE,
+} from '../queues/housekeeping.js';
 import './services.js'; // registers the "Service stopped" alert source for the worker
 
-// Alerting, website checks and delivery live in their own services; they are re-exported here so the
-// worker (and older callers) have one place to import background steps from.
-export { evaluateAlerts, deliverNotifications };
+// Alerting, website checks and delivery live in their own services; they are re-exported here so older
+// callers (and tests) have one place to import background steps from. The `*Once` sweeps run a whole
+// pass inline with an injectable clock; production work goes through the BullMQ queues in ../queues.
+export { evaluateAlerts, deliverNotifications, housekeeping };
 export const runChecks = (store, options) => runDueChecks(store, options);
 
-export async function housekeeping(store) {
-  for (const agent of await store.list('agent')) {
-    if (agent.status === 'revoked' || agent.status === 'offline') continue;
-    if (Date.now() - new Date(agent.lastSeen) > 180000) {
-      await store.update('agent', agent.id, { status: 'offline' });
-      for (const r of await store.list('monitoredResource', { agentId: agent.id }))
-        await store.update('monitoredResource', r.id, { status: 'unhealthy' });
-    }
-  }
-  for (const org of await store.list('organization')) {
-    let days = 7;
-    try {
-      days = (await entitlements(store, org.id)).plan.retentionDays;
-    } catch {
-      /* retain metadata after subscription expiry */
-    }
-    const createdAt = { lt: new Date(Date.now() - days * 86400000) };
-    for (const table of ['uptimeCheck', 'notificationDelivery'])
-      await store.removeMany(table, { orgId: org.id, createdAt });
-  }
-  // Expired sessions are useless; remove them in bulk.
-  const now = new Date();
-  await store.removeMany('session', {
-    OR: [{ expiresAt: { lt: now } }, { revokedAt: { lt: new Date(Date.now() - 7 * 86400000) } }],
-  });
-  // Install steps from a machine that never registered, and old agent events, are only useful briefly.
-  await store.removeMany('agentEvent', {
-    agentId: null,
-    createdAt: { lt: new Date(Date.now() - 7 * 86400000) },
-  });
-  await store.removeMany('agentEvent', { createdAt: { lt: new Date(Date.now() - 30 * 86400000) } });
-  // Per-plan raw history limits only need checking occasionally.
-  if (Date.now() - lastMetricTrim > 3600000) {
-    lastMetricTrim = Date.now();
-    await runDunning(store).catch((error) => console.error('[billing] dunning:', error.message));
-    await trimRawMetricsByPlan(store);
-    await trimContainerMetricsByPlan(store);
-  }
-}
-let lastMetricTrim = 0;
-
-export const LEASE_ID = 'main-worker';
-export const LEASE_MS = 90000;
 /**
- * Try to become the single active worker. The lease lives in Postgres, so two worker processes can
- * never run at once, and a crashed worker is replaced as soon as its lease expires.
+ * Worker roles. Each role has `start(store, options)` returning a handle `{ workers, stop }` and the list of
+ * queue names it serves (for /healthz).
+ *
+ * WIRING HOOK (ingest / side-effects): call `registerRole('ingest', { queues: ['ingest'], start })` and
+ * `registerRole('side-effects', ...)` from the module that owns them and import that module in
+ * src/worker.js (or add the entries to ROLES below). `--role=all` starts every registered role.
  */
-export async function acquireLease(store, holder, ttlMs = LEASE_MS) {
-  const expiresAt = new Date(Date.now() + ttlMs);
-  const row = await store.find('workerLease', { id: LEASE_ID });
-  if (!row) {
-    try {
-      await store.create('workerLease', { id: LEASE_ID, holder, expiresAt });
-      return true;
-    } catch (error) {
-      if (error.code === 'P2002') return false; // another worker created it first
-      throw error;
-    }
-  }
-  if (row.holder !== holder && row.expiresAt > new Date()) return false;
-  // Atomically take over only if nobody changed the lease since we read it.
-  return store.claim(
-    'workerLease',
-    LEASE_ID,
-    { holder: row.holder, expiresAt: row.expiresAt },
-    { holder, expiresAt },
-  );
+export const ROLES = {
+  checks: {
+    queues: [CHECKS_QUEUE],
+    async start(store, options = {}) {
+      const worker = startChecksWorker(store, options.checks);
+      await worker.waitUntilReady();
+      await reconcileMonitors(store); // schedulers for every enabled monitor, even after a Redis flush
+      return { workers: [worker] };
+    },
+  },
+  alerts: {
+    queues: [ALERTS_QUEUE],
+    async start(store, options = {}) {
+      const worker = startAlertsWorker(store, options.alerts);
+      await worker.waitUntilReady();
+      await startAlertsScheduler(options.alertsEveryMs);
+      return { workers: [worker] };
+    },
+  },
+  notify: {
+    queues: [NOTIFY_QUEUE],
+    async start(store, options = {}) {
+      const worker = startNotifyWorker(store, options.notify);
+      await worker.waitUntilReady();
+      return { workers: [worker], onStop: async () => closeSmtp() };
+    },
+  },
+  housekeeping: {
+    queues: [HOUSEKEEPING_QUEUE],
+    async start(store, options = {}) {
+      const worker = startHousekeepingWorker(store, options.housekeeping);
+      await worker.waitUntilReady();
+      await startHousekeepingSchedulers();
+      return { workers: [worker] };
+    },
+  },
+  // <-- ingest / side-effects roles are registered here by the ingest pipeline (see hook above).
+};
+export function registerRole(name, role) {
+  ROLES[name] = role;
 }
-export async function releaseLease(store, holder) {
-  await store.client?.workerLease.updateMany({
-    where: { id: LEASE_ID, holder },
-    data: { expiresAt: new Date(0) },
-  });
-}
+export const roleNames = () => Object.keys(ROLES);
 
-/** One pass of background work. Returns false when another worker holds the lease. */
-export async function runWorkerTick(store, holder) {
-  if (!(await acquireLease(store, holder))) return false;
-  for (const step of [runChecks, refreshDomainExpiry, evaluateAlerts, deliverNotifications, housekeeping]) {
-    await step(store);
-    // A long step must not let the lease expire underneath us.
-    if (!(await acquireLease(store, holder))) return false;
-  }
-  return true;
-}
-export function startWorkers(store) {
-  const holder = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
-  let running = false;
-  const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      await runWorkerTick(store, holder);
-    } catch (error) {
-      console.error('Worker:', error.message);
-    } finally {
-      running = false;
-    }
-  };
-  tick();
-  const timer = setInterval(tick, config.WORKER_INTERVAL_MS);
-  return async () => {
-    clearInterval(timer);
-    await releaseLease(store, holder).catch(() => {});
+/**
+ * Start the given roles ('all' or undefined = every registered role). Returns
+ * `{ roles, stop(), health() }`. `stop()` lets active jobs finish, then closes workers, queues, SMTP and
+ * the Redis connections this process opened. Starting twice with the same store is fine (schedulers are
+ * idempotent), which is how tests run "three workers".
+ */
+export async function startRoles(store, roles = 'all', options = {}) {
+  const wanted = roles === 'all' || !roles ? roleNames() : [].concat(roles);
+  for (const name of wanted) if (!ROLES[name]) throw new Error(`Unknown worker role "${name}".`);
+  const handles = [];
+  for (const name of wanted) handles.push({ name, ...(await ROLES[name].start(store, options)) });
+  const queues = [...new Set(wanted.flatMap((name) => ROLES[name].queues ?? []))];
+  let stopped = false;
+  return {
+    roles: wanted,
+    handles,
+    async stop({ closeConnections = true } = {}) {
+      if (stopped) return;
+      stopped = true;
+      for (const handle of handles) {
+        await Promise.all((handle.workers ?? []).map((w) => stopWorker(w)));
+        await handle.onStop?.();
+      }
+      if (closeConnections) await closeQueues();
+    },
+    /** Status for /healthz: queue connection, job counts and the last time each queue finished a job. */
+    async health() {
+      const connected = await queueConnected();
+      return { ok: connected, roles: wanted, redis: connected, queues: connected ? await queueStatus(queues) : {} };
+    },
   };
 }

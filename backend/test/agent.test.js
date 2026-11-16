@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { root } from '../src/config.js';
-import { setup, closeStore, register } from './helpers.js';
+import { setup, closeStore, register, drainIngest } from './helpers.js';
 
 after(closeStore);
 const agentScript = join(root, 'backend/scripts/agent.mjs');
@@ -64,7 +64,10 @@ test(
         AGENT_NAME: 'script-test-host',
       });
       children.push(first.child);
-      const rows = () => store.client.serverMetric.findMany({ where: { orgId: owner.orgId } });
+      const rows = async () => {
+        await drainIngest(); // the dev agent's reports sit in the queue until a worker runs
+        return store.client.serverMetric.findMany({ where: { orgId: owner.orgId } });
+      };
       await until(async () => (await rows()).length >= 2, first.child, first.output);
       const agent = await store.find('agent', { name: 'script-test-host' });
       assert.equal(agent.status, 'healthy');

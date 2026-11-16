@@ -159,7 +159,20 @@ export async function ensureResource(store, monitor, existing) {
   });
 }
 
-class Gate {
+/**
+ * Run one monitor's check and store the outcome (one queue job = this). Creates the resource row when
+ * missing. Returns { result, status } where status is the monitor's new state.
+ */
+export async function checkMonitorNow(store, monitor, { now = Date.now(), request, connect, resource } = {}) {
+  const result = await runCheck(monitor, { request, connect });
+  if (resource === undefined)
+    resource = await store.find('monitoredResource', { orgId: monitor.orgId, externalId: monitor.id, type: 'uptime' });
+  if (!resource || resource.deletedAt) resource = await ensureResource(store, monitor, resource);
+  const status = await recordCheckResult(store, monitor, result, resource, now);
+  return { result, status };
+}
+
+export class Gate {
   constructor(size) {
     this.size = size;
     this.active = 0;
