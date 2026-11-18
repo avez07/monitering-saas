@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -32,8 +33,10 @@ func NormalizeAPIURL(raw string) (string, error) {
 	switch strings.ToLower(u.Scheme) {
 	case "https":
 	case "http":
-		if !isLoopbackName(host) {
-			return "", fmt.Errorf("refusing to send credentials over http:// to %s. Use an https:// API URL", host)
+		if !isLoopbackName(host) && !AllowInsecure() {
+			return "", fmt.Errorf("refusing to send credentials over plain http:// to %s. Use an https:// API URL. "+
+				"For local development only (for example http://host.docker.internal:4000 from Docker Desktop) "+
+				"set %s=true to allow plain HTTP", host, EnvAllowInsecure)
 		}
 	default:
 		return "", fmt.Errorf("the API URL must start with https:// (got %q)", raw)
@@ -42,6 +45,19 @@ func NormalizeAPIURL(raw string) (string, error) {
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawPath = ""
 	return u.String(), nil
+}
+
+// EnvAllowInsecure is the explicit development opt-in that allows plain http:// to any host.
+// It is off by default, so production installs always require HTTPS (except for loopback names).
+const EnvAllowInsecure = "YUKTIOPS_ALLOW_INSECURE"
+
+// AllowInsecure reports whether the development opt-in is switched on (true, 1, yes, on).
+func AllowInsecure() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvAllowInsecure))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // isLoopbackName mirrors the development agent: only these exact names count as "this machine".

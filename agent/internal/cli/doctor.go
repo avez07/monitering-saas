@@ -264,7 +264,10 @@ func (d *Doctor) checkHTTPS(ctx context.Context, cl *client.Client) (Result, Res
 			r.Fix = "Fix DNS first (see above), then run doctor again."
 		case client.KindBlocked:
 			r.Code = CodeHTTPSUnreachable
-			r.Fix = fmt.Sprintf("Allow outbound HTTPS (port 443) to %s in your firewall or security group. Test it with: curl -I %s/api/health", cl.Host(), cl.BaseURL())
+			r.Fix = fmt.Sprintf("Allow outbound connections to %s in your firewall or security group (production: HTTPS, port 443). Test it with: curl -I %s/api/health", cl.BaseURL(), cl.BaseURL())
+			if hint := cl.LocalhostHint(); hint != "" {
+				r.Fix += "." + hint
+			}
 		case client.KindProxy:
 			r.Code = CodeProxyError
 			r.Fix = "Check the proxy address and its login in HTTPS_PROXY. Test with: curl -I -x $HTTPS_PROXY " + cl.BaseURL() + "/api/health"

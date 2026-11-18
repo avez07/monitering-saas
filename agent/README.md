@@ -35,12 +35,36 @@ sudo systemctl daemon-reload && sudo systemctl enable --now yuktiops-agent
 ```
 docker run -d --name yuktiops-agent --restart unless-stopped \
   --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro --group-add $(stat -c '%g' /var/run/docker.sock) \
   -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops \
   ghcr.io/yuktiops/agent
 ```
 
-The `--pid host`, `--network host`, `-v /:/host:ro` and `HOST_ROOT` parts make the agent report the server itself. Without them it only sees its own container. Leave out the `docker.sock` line if you do not want container stats.
+The `--pid host`, `--network host`, `-v /:/host:ro` and `HOST_ROOT` parts make the agent report the server itself. Without them it only sees its own container. Leave out the `docker.sock` and `--group-add` lines if you do not want container stats. The agent in the container is not root and the socket belongs to root, so `--group-add 0` is needed on Docker Desktop (Windows, Mac). On a Linux server use `--group-add $(stat -c '%g' /var/run/docker.sock)` instead (the socket's group is usually `docker`). Without it the agent runs but no containers appear.
+
+**Image says `denied` / `pull access denied`?** The GHCR package is private or not published yet. Either `docker login ghcr.io` (a GitHub token with `read:packages`), or build it yourself from this repository (works offline from the registry):
+
+bash / Git Bash / macOS (repo root):
+
+```
+docker build -t yuktiops-agent:local -f agent/Dockerfile agent
+docker run -d --name yuktiops-agent --restart unless-stopped   --pid host --network host -v /:/host:ro -e HOST_ROOT=/host   -v /var/run/docker.sock:/var/run/docker.sock:ro --group-add 0   -e YUKTIOPS_API_KEY=yk_live_... -e YUKTIOPS_API_URL=http://localhost:4000   -v yuktiops-agent:/var/lib/yuktiops yuktiops-agent:local
+```
+
+PowerShell (repo root):
+
+```
+docker build -t yuktiops-agent:local -f agent/Dockerfile agent
+docker run -d --name yuktiops-agent --restart unless-stopped `
+  --pid host --network host -v /:/host:ro -e HOST_ROOT=/host `
+  -v /var/run/docker.sock:/var/run/docker.sock:ro --group-add 0 `
+  -e YUKTIOPS_API_KEY=yk_live_... -e YUKTIOPS_API_URL=http://localhost:4000 `
+  -v yuktiops-agent:/var/lib/yuktiops yuktiops-agent:local
+```
+
+Or with compose: `YUKTIOPS_API_KEY=yk_live_... docker compose --profile agent up -d --build` (PowerShell: `$env:YUKTIOPS_API_KEY='yk_live_...'; docker compose --profile agent up -d --build`). Set `YUKTIOPS_AGENT_IMAGE` to use another image name.
+
+**Publishing the image (maintainers).** After the first release run, GHCR creates the package as private. Make it public once: GitHub -> your org/profile -> Packages -> `agent` -> Package settings -> Change visibility -> Public. Verify from a logged-out machine: `docker logout ghcr.io && docker pull ghcr.io/yuktiops/agent:latest`.
 
 **Docker Desktop on Windows or Mac.** Important: here the agent monitors Docker's Linux VM and your containers, **not** the Windows or Mac computer itself. Use the same command (`/host` is then the VM).
 
@@ -49,7 +73,7 @@ PowerShell:
 ```
 docker run -d --name yuktiops-agent --restart unless-stopped `
   --pid host --network host -v /:/host:ro -e HOST_ROOT=/host `
-  -v /var/run/docker.sock:/var/run/docker.sock:ro `
+  -v /var/run/docker.sock:/var/run/docker.sock:ro --group-add 0 `
   -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops `
   ghcr.io/yuktiops/agent
 ```
@@ -63,6 +87,34 @@ MSYS_NO_PATHCONV=1 docker run -d --name yuktiops-agent --restart unless-stopped 
   -e YUKTIOPS_API_KEY=yk_live_... -v yuktiops-agent:/var/lib/yuktiops \
   ghcr.io/yuktiops/agent
 ```
+
+**Local development against an API on your own computer (Docker Desktop on Windows or Mac)**
+
+Inside a container, `localhost` is **not** your computer. On Docker Desktop it is the container itself, or with `--network host` Docker's Linux VM. Reach the API on your computer through `host.docker.internal`. The agent only accepts plain `http://` for the names `localhost`, `127.0.0.1` and `::1`, so any other http address needs an explicit opt-in, `YUKTIOPS_ALLOW_INSECURE=true`. Leave it off in production: HTTPS stays required by default.
+
+PowerShell (after `docker build -t ghcr.io/yuktiops/agent:0.0.0-dev -f agent/Dockerfile agent`):
+
+```
+docker run -d --name yuktiops-agent --restart unless-stopped `
+  --pid host -v /:/host:ro -e HOST_ROOT=/host `
+  -e YUKTIOPS_API_KEY=yk_live_... `
+  -e YUKTIOPS_API_URL=http://host.docker.internal:4000 `
+  -e YUKTIOPS_ALLOW_INSECURE=true `
+  -v yuktiops-agent:/var/lib/yuktiops `
+  -v /var/run/docker.sock:/var/run/docker.sock:ro --group-add 0 `
+  ghcr.io/yuktiops/agent:0.0.0-dev
+```
+
+`--network host` is left out on purpose: with it, `host.docker.internal` may not resolve and the agent would report the VM's network instead. Add it back only if you need the VM's network counters and `docker exec yuktiops-agent yuktiops-agent doctor` still passes.
+
+If it still fails, read the message. It names the URL, scheme, host, port, the address that was dialed and the reason (`connection refused`, `timed out`, `DNS failure`, a certificate or TLS error), for example:
+
+```
+This server cannot reach http://localhost:4000 (scheme http, host localhost, port 4000, resolved 127.0.0.1:4000): connection refused (nothing is listening at that address and port). Note: inside a container, localhost is the container itself ...
+Error code: https_unreachable
+```
+
+The code name `https_unreachable` is kept for the dashboard's error catalog; it also covers plain-http connection failures. Run the full diagnosis inside the container with `docker exec yuktiops-agent yuktiops-agent doctor`. Check the API itself from Windows with `curl http://localhost:4000/api/health`; the API must listen on all interfaces, not only 127.0.0.1 inside WSL.
 
 **Check that it works**
 
@@ -162,11 +214,11 @@ setup_id: "st_0123456789abcdef01234567"
 
 What is collected and how often (`sendIntervalSeconds`, `sampleIntervalSeconds`, and which built-in collectors are on) is managed from the dashboard. The agent pulls it when the version announced in a response changes.
 
-Environment variables (for development and containers): `HOST_ROOT` (see below), `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`.
+Environment variables (for development and containers): `HOST_ROOT` (see below), `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_ALLOW_INSECURE` (development only: allow plain `http://` to any host), `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`.
 
 ## Security model
 
-- **Outbound only.** The agent opens no listening port. It talks to one host, over HTTPS; redirects are never followed, so the credential cannot leak to another host. Plain HTTP is refused except for `localhost`.
+- **Outbound only.** The agent opens no listening port. It talks to one host, over HTTPS; redirects are never followed, so the credential cannot leak to another host. Plain HTTP is refused except for `localhost` (or any host when `YUKTIOPS_ALLOW_INSECURE=true`, for development).
 - **Never executes remote commands.** The only thing YuktiOps can change remotely is which built-in, read-only collectors run and how often. Settings are validated and clamped; invalid ones are ignored.
 - **Least privilege.** It runs as the system user `yuktiops` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp`, a restricted set of socket families, and hard memory and CPU caps. Docker access is opt-in (profile setting or `--docker`) because the Docker socket is root-equivalent.
 - **Secrets.** The account API key is used once to register and is never written to disk. The server's own credential is stored `0640 root:yuktiops`, can be revoked from the dashboard, and only identifies this one server. Installers verify the SHA-256 of the download and abort on a mismatch.

@@ -234,3 +234,21 @@ func TestFingerprintUsesHostMachineID(t *testing.T) {
 		t.Errorf("fingerprint = %q, %v", got, err)
 	}
 }
+
+func TestAllowInsecureOptIn(t *testing.T) {
+	t.Setenv(EnvAllowInsecure, "")
+	if _, err := NormalizeAPIURL("http://host.docker.internal:4000"); err == nil ||
+		!strings.Contains(err.Error(), EnvAllowInsecure) {
+		t.Fatalf("plain http to a non-loopback host must be refused and name the opt-in, got %v", err)
+	}
+	if got, err := NormalizeAPIURL("http://localhost:4000"); err != nil || got != "http://localhost:4000" {
+		t.Errorf("localhost over http stays allowed: %q %v", got, err)
+	}
+	t.Setenv(EnvAllowInsecure, "true")
+	if got, err := NormalizeAPIURL("http://host.docker.internal:4000"); err != nil || got != "http://host.docker.internal:4000" {
+		t.Errorf("opt-in should allow plain http: %q %v", got, err)
+	}
+	if _, err := NormalizeAPIURL("ftp://x"); err == nil {
+		t.Error("other schemes stay refused even with the opt-in")
+	}
+}
