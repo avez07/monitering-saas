@@ -195,7 +195,7 @@ export const eventToApi = (e) => ({ id: e.id, type: e.type, message: e.message, 
 /** Map of agent id to { name } for the org's live (not removed) servers. */
 export async function serverNames(store, orgId) {
   const live = await liveServers(store, orgId);
-  return new Map(live.map(({ agent, resource }) => [agent.id, { name: resource.name, hostname: agent.name, kind: agent.kind || 'server' }]));
+  return new Map(live.map(({ agent, resource }) => [agent.id, { name: resource.name, hostname: agent.name, kind: agent.kind || 'server', lastSeen: agent.lastSeen }]));
 }
 
 export async function listContainers(store, orgId, { serverId, state, search } = {}) {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Trash2 } from 'lucide-react';
 import {
   CardSkeleton,
   ConfirmDialog,
@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAction, useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
+import EditServiceDialog from './EditServiceDialog';
+import LocalTestGuide from './LocalTestGuide';
 
 const STATE = {
   running: { status: 'healthy', label: 'Running' },
@@ -43,6 +45,7 @@ export default function ServiceDetail() {
   );
   const action = useAction();
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
   const header = (title) => (
     <PageHeader
       title={title}
@@ -81,9 +84,14 @@ export default function ServiceDetail() {
         breadcrumbs={[{ label: 'Services', to: '/services' }, { label: s.name }]}
         actions={
           isAdmin && (
-            <Button variant="outline" onClick={() => setConfirm(true)}>
-              <Trash2 className="size-4" aria-hidden="true" /> Remove
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditing(true)}>
+                <Pencil className="size-4" aria-hidden="true" /> Edit
+              </Button>
+              <Button variant="outline" onClick={() => setConfirm(true)}>
+                <Trash2 className="size-4" aria-hidden="true" /> Remove
+              </Button>
+            </div>
           )
         }
       />
@@ -118,6 +126,22 @@ export default function ServiceDetail() {
             </div>
           </CardContent>
         </Card>
+        {s.health && (
+          <Alert variant="destructive" role="alert" data-testid="service-health">
+            <AlertTitle>
+              {s.health.message} <code className="text-xs">{s.health.code}</code>
+            </AlertTitle>
+            <AlertDescription className="space-y-1">
+              {s.health.cause && <p>Reason: {s.health.cause}</p>}
+              {s.health.since && (
+                <p>
+                  Since: <RelativeTime value={s.health.since} />
+                </p>
+              )}
+              {s.health.hint && <p>What to do: {s.health.hint}</p>}
+            </AlertDescription>
+          </Alert>
+        )}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">History</CardTitle>
@@ -137,7 +161,19 @@ export default function ServiceDetail() {
             )}
           </CardContent>
         </Card>
+        <LocalTestGuide type={s.type || s.kind} />
+        {data && !data.type && <LocalTestGuide type={s.kind} />}
       </div>
+      {editing && (
+        <EditServiceDialog
+          service={s}
+          onClose={() => setEditing(false)}
+          onSaved={(newId) => {
+            setEditing(false);
+            if (newId && newId !== id) navigate(`/services/${newId}`, { replace: true });
+          }}
+        />
+      )}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

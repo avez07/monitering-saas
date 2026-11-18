@@ -8,6 +8,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/yuktiops/agent/internal/config"
@@ -127,7 +129,7 @@ func (c *Checker) one(ctx context.Context, s remote.Service, procs map[string]bo
 	case "port":
 		conn, err := dial(ctx, host, s.Port)
 		if err != nil {
-			r.Detail = "connection failed"
+			r.Detail = dialDetail(err)
 			break
 		}
 		conn.Close()
@@ -141,7 +143,7 @@ func (c *Checker) one(ctx context.Context, s remote.Service, procs map[string]bo
 	case "redis", "mysql", "postgres":
 		conn, err := dial(ctx, host, s.Port)
 		if err != nil {
-			r.Detail = "connection failed"
+			r.Detail = dialDetail(err)
 			break
 		}
 		detail, ok := probe(s.Kind, conn)
@@ -153,6 +155,21 @@ func (c *Checker) one(ctx context.Context, s remote.Service, procs map[string]bo
 		}
 	}
 	return r
+}
+
+// dialDetail says why a connection failed, in words the dashboard can classify: "connection
+// refused", "timed out" or "DNS lookup failed". It never contains the host or anything secret.
+func dialDetail(err error) string {
+	var dns *net.DNSError
+	switch {
+	case errors.As(err, &dns):
+		return "DNS lookup failed"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err):
+		return "timed out"
+	}
+	return "connection failed"
 }
 
 func dial(ctx context.Context, host string, port int) (net.Conn, error) {

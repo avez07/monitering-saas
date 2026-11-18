@@ -1,5 +1,6 @@
 import { assert } from '../lib/errors.js';
 import { registerMetricSource } from './alert-metrics.js';
+import { serviceHealth } from './service-health.js';
 import { recordStateEvent, serverNames, eventToApi, STOPPED_INGESTS } from './containers.js';
 
 export const SERVICE_KINDS = ['systemd', 'process', 'port', 'nginx', 'apache', 'mysql', 'postgres', 'redis'];
@@ -73,6 +74,7 @@ export function serviceToApi(s, server) {
     lastSeen: s.lastSeen,
     lastChecked: s.lastSeen,
     stateChangedAt: s.stateChangedAt,
+    health: serviceHealth(s, server),
   };
 }
 
