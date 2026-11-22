@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Server } from 'lucide-react';
+import { Plus, Search, Server, Server as ServerIcon } from 'lucide-react';
 import {
   CardSkeleton,
   EmptyState,
@@ -17,14 +17,28 @@ import { Switch } from '@/components/ui/switch';
 import { useServers } from './api';
 import { bySeverity, serverReason, serverStatus, statusLabel } from './status';
 
+const STRIP = {
+  healthy: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  unhealthy: 'bg-destructive',
+  unknown: 'bg-muted-foreground/40',
+};
+
 function ServerCard({ server }) {
   const reason = serverReason(server);
   return (
-    <Card className="h-full transition-colors hover:bg-accent/50">
-      <CardContent className="space-y-4 p-5">
+    <Card className="surface card-accent relative h-full overflow-hidden transition-shadow duration-150 hover:shadow-md">
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0 left-0 w-1 ${STRIP[serverStatus(server)] || STRIP.unknown}`}
+      />
+      <CardContent className="space-y-4 p-5 pl-6">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <ServerIcon className="size-5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-serif text-base font-semibold">
               <Link
                 to={`/servers/${server.id}`}
                 className="rounded-sm after:absolute after:inset-0 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -43,12 +57,12 @@ function ServerCard({ server }) {
           </div>
           <StatusBadge status={serverStatus(server)} label={statusLabel(server)} />
         </div>
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-3 md:grid-cols-1 2xl:grid-cols-3">
           <MetricBar label="CPU" value={server.cpu} />
           <MetricBar label="Memory" value={server.memory} />
           <MetricBar label="Disk" value={server.disk} />
         </div>
-        {reason && <p className="text-sm">{reason}</p>}
+        {reason && <p className="text-xs text-foreground/80">{reason}</p>}
         <p className="text-sm text-muted-foreground">
           Last seen {server.lastSeen ? <RelativeTime value={server.lastSeen} /> : 'never'}
         </p>
@@ -95,7 +109,7 @@ export default function ServerList() {
       />
       {isLoading ? (
         <div
-          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+          className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
           role="status"
           aria-label="Loading servers"
         >
@@ -114,7 +128,7 @@ export default function ServerList() {
         />
       ) : (
         <div className="space-y-4">
-          <div className="relative max-w-sm">
+          <div className="relative w-full sm:max-w-sm">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -129,9 +143,9 @@ export default function ServerList() {
             />
           </div>
           {shown.length === 0 ? (
-            <p className="py-8 text-center text-muted-foreground">No server matches that search.</p>
+            <p className="py-12 text-center text-sm text-muted-foreground">No server matches that search.</p>
           ) : (
-            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {shown.map((s) => (
                 <li key={s.id} className="relative min-w-0">
                   <ServerCard server={s} />

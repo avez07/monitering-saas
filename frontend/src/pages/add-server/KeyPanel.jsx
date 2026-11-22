@@ -66,7 +66,7 @@ export default function KeyPanel({ keyValue, onKey }) {
 
   if (!existing.data)
     return (
-      <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="space-y-3 surface card-accent p-4">
         <p className="font-medium">First, create your API key</p>
         <p className="text-sm text-muted-foreground">
           The key lets servers join your account. You only need one for all your servers.
@@ -83,7 +83,7 @@ export default function KeyPanel({ keyValue, onKey }) {
     );
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4">
+    <div className="space-y-3 surface card-accent p-4">
       <FormField
         label="Your API key"
         hint={`Starts with yk_live_ (yours begins ${prefix}). We can't show it again after it was created.`}

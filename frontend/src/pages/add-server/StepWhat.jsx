@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label';
 
 function Choice({ id, label, children, checked, onChange, disabled, badge }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border bg-card p-4">
+    <div className="flex items-start gap-3 surface card-accent p-4">
       <Checkbox
         id={id}
         checked={checked}
@@ -14,7 +14,7 @@ function Choice({ id, label, children, checked, onChange, disabled, badge }) {
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor={id} className="text-base font-medium">
+          <Label htmlFor={id} className="text-sm font-medium">
             {label}
           </Label>
           {badge && <Badge variant="secondary">{badge}</Badge>}

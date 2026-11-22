@@ -69,13 +69,13 @@ export default function Traces() {
   ];
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title="Traces"
         description="Follow one request through all your services, step by step."
         breadcrumbs={[{ label: 'Apps', to: '/apps' }, { label: 'Traces' }]}
       />
-      <Card className="mb-6">
+      <Card className="surface card-accent mb-6">
         <CardContent className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
           <ServiceSelect value={f.service} onChange={(v) => set({ service: v })} />
           <div className="space-y-1.5">
@@ -154,6 +154,6 @@ export default function Traces() {
           )}
         </>
       )}
-    </>
+    </div>
   );
 }

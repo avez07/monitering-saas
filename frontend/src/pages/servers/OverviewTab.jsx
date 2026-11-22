@@ -128,7 +128,7 @@ export default function OverviewTab({ server }) {
         </p>
       )}
 
-      <section aria-label="Right now" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Right now" className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
         <StatCard
           label="CPU"
           value={formatPercent(server.cpu)}
@@ -156,7 +156,7 @@ export default function OverviewTab({ server }) {
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">History</h2>
+        <h2 className="font-serif text-base font-semibold tracking-tight">History</h2>
         <RangePicker value={range} onChange={setRange} />
       </div>
       {metrics.data?.clamped && (
@@ -238,7 +238,7 @@ export default function OverviewTab({ server }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Disk space by drive</CardTitle>
+            <CardTitle className="font-serif text-base font-semibold tracking-tight">Disk space by drive</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {server.disks?.length ? (
@@ -257,7 +257,7 @@ export default function OverviewTab({ server }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Network cards</CardTitle>
+            <CardTitle className="font-serif text-base font-semibold tracking-tight">Network cards</CardTitle>
           </CardHeader>
           <CardContent>
             {server.interfaces?.length ? (
@@ -279,14 +279,14 @@ export default function OverviewTab({ server }) {
       </div>
 
       <section aria-labelledby="procs">
-        <h2 id="procs" className="mb-3 text-lg font-semibold">
+        <h2 id="procs" className="mb-3 font-serif text-base font-semibold tracking-tight">
           Busiest programs
         </h2>
         <DataTable
           rows={server.processes ?? []}
           getKey={(p) => `${p.pid}-${p.name}`}
           empty={
-            <p className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+            <p className="surface border-dashed p-8 text-center text-muted-foreground">
               No program information. It may be switched off in this server's settings.
             </p>
           }

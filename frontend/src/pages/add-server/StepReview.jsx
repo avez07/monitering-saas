@@ -90,7 +90,7 @@ export default function StepReview({ settings, onChange, docker, error }) {
           {COLLECTORS.map((c) => (
             <li
               key={c.key}
-              className="flex items-center justify-between gap-3 rounded-lg border bg-card p-3"
+              className="flex items-center justify-between gap-3 surface p-3"
             >
               <div className="min-w-0">
                 <Label htmlFor={`col-${c.key}`} className="font-medium">

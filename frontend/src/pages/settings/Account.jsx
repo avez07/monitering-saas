@@ -45,9 +45,9 @@ function Organization({ organization, isAdmin }) {
   const [name, setName] = useState(organization?.name || '');
   const rename = useDo((value) => renameOrg(value), { success: 'Organization renamed.' });
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Organization</CardTitle>
+        <CardTitle className="font-serif text-base">Organization</CardTitle>
         <CardDescription>The name your team sees.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -101,9 +101,9 @@ export default function Account() {
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
-          <CardTitle className="text-lg">Your profile</CardTitle>
+          <CardTitle className="font-serif text-base">Your profile</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid gap-4 sm:grid-cols-2">
@@ -122,9 +122,9 @@ export default function Account() {
 
       <Organization key={organization?.id} organization={organization} isAdmin={isAdmin} />
 
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
-          <CardTitle className="text-lg">Password and sessions</CardTitle>
+          <CardTitle className="font-serif text-base">Password and sessions</CardTitle>
           <CardDescription>
             To change your password we email you a secure link. Opening it signs you out on every
             device.

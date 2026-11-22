@@ -27,8 +27,28 @@ export function createRedisConnection({ url = redisUrl(), blocking = false, pref
     lazyConnect: false,
   });
   // Without a listener ioredis would crash the process on connection errors; it reconnects by itself.
+  // ioredis emits this on every retry (~every 50ms-2s), so an unreachable Redis would flood the log.
+  // Log the first failure per connection, then at most once a minute with a repeat count.
+  let lastLogged = 0;
+  let suppressed = 0;
   client.on('error', (error) => {
-    if (process.env.NODE_ENV !== 'test') console.error(`redis(${name || 'client'}): ${error.message}`);
+    if (process.env.NODE_ENV === 'test') return;
+    const now = Date.now();
+    if (lastLogged && now - lastLogged < 60_000) {
+      suppressed += 1;
+      return;
+    }
+    // AggregateError (ECONNREFUSED on ::1 and 127.0.0.1) has an empty message, so fall back to the code.
+    const reason = error.message || error.code || error.errors?.[0]?.message || String(error);
+    const repeats = suppressed ? ` (+${suppressed} similar errors in the last minute)` : '';
+    console.error(`redis(${name || 'client'}): ${reason} - is Redis running at ${url}?${repeats}`);
+    lastLogged = now;
+    suppressed = 0;
+  });
+  client.on('ready', () => {
+    if (lastLogged && process.env.NODE_ENV !== 'test') console.log(`redis(${name || 'client'}): connected`);
+    lastLogged = 0;
+    suppressed = 0;
   });
   return client;
 }

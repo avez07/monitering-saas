@@ -138,8 +138,22 @@ export const DOCKER_DESKTOP_NOTE =
   "On Docker Desktop the agent monitors Docker's Linux virtual machine and your containers, not your Windows or Mac computer itself.";
 
 const isLocalApi = (apiUrl) => !!apiUrl && /localhost|127\.0\.0\.1/.test(apiUrl);
+// Override at build time with VITE_YUKTIOPS_AGENT_IMAGE (for example yuktiops-agent:local).
+export const AGENT_IMAGE_DEFAULT = 'ghcr.io/yuktiops/agent:latest';
 const imageOf = (release) =>
-  release?.docker ? `${release.docker.image}:${release.docker.tag}` : 'ghcr.io/yuktiops/agent:latest';
+  import.meta.env?.VITE_YUKTIOPS_AGENT_IMAGE ||
+  (release?.docker ? `${release.docker.image}:${release.docker.tag}` : AGENT_IMAGE_DEFAULT);
+
+/** Shown next to the Docker command when the pull is refused (image not public yet). */
+export const DOCKER_DENIED_HELP = {
+  title: 'See "denied" or "pull access denied"?',
+  body: 'The image is not public yet. Build it from this repository instead, then run the same command with the image yuktiops-agent:local.',
+  build: 'docker build -t yuktiops-agent:local -f agent/Dockerfile agent',
+  powershell: 'docker build -t yuktiops-agent:local -f agent/Dockerfile agent',
+  bash: 'docker build -t yuktiops-agent:local -f agent/Dockerfile agent',
+  image: 'yuktiops-agent:local',
+  login: 'docker login ghcr.io',
+};
 
 /**
  * `docker run` for the agent. `platform`: linux | windows | mac. For windows, `shell` is
@@ -163,7 +177,14 @@ export function dockerRun({
     `-e YUKTIOPS_API_KEY=${key || 'YOUR_API_KEY'}`,
     ...(isLocalApi(apiUrl) ? [`-e YUKTIOPS_API_URL=${apiUrl}`] : []),
     '-v yuktiops-agent:/var/lib/yuktiops',
-    ...(docker ? ['-v /var/run/docker.sock:/var/run/docker.sock:ro'] : []),
+    ...(docker
+      ? [
+          '-v /var/run/docker.sock:/var/run/docker.sock:ro',
+          // The agent runs as a non-root user; without the socket's group it cannot list containers.
+          // Docker Desktop (Windows, Mac): the socket belongs to root (group 0). Linux: its own group.
+          platform === 'linux' ? "--group-add $(stat -c '%g' /var/run/docker.sock)" : '--group-add 0',
+        ]
+      : []),
     imageOf(release),
   ];
   const body = lines.map((l, i) => (i === 0 ? l : `  ${l}`));
@@ -181,6 +202,13 @@ export function dockerCompose({ release, key, apiUrl, docker }) {
     '    restart: unless-stopped',
     '    pid: host',
     '    network_mode: host',
+    ...(docker
+      ? [
+          '    # Lets the non-root agent read the Docker socket. Docker Desktop: 0. Linux: DOCKER_GID=$(stat -c %g /var/run/docker.sock)',
+          '    group_add:',
+          '      - "${DOCKER_GID:-0}"',
+        ]
+      : []),
     '    environment:',
     `      YUKTIOPS_API_KEY: ${key || 'YOUR_API_KEY'}`,
     '      HOST_ROOT: /host',

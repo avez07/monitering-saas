@@ -12,4 +12,12 @@
     /* storage can be unavailable in private windows: stay on the light default */
   }
   document.documentElement.classList.toggle('dark', dark);
+  try {
+    var palette = localStorage.getItem('yuktiops.palette');
+    if (palette && /^[a-z]+$/.test(palette) && palette !== 'warm') {
+      document.documentElement.setAttribute('data-palette', palette);
+    }
+  } catch (error) {
+    /* default palette */
+  }
 })();

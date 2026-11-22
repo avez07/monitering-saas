@@ -43,7 +43,7 @@ export function CopyField({ value, label = 'value', className }) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <code
-        className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border bg-muted px-3 py-2 font-mono text-sm"
+        className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-xl border bg-muted px-3 py-2 font-mono text-sm"
         tabIndex={0}
       >
         {value}
@@ -56,7 +56,7 @@ export function CopyField({ value, label = 'value', className }) {
 /** Multi-line code or config with a Copy button. */
 export function CodeBlock({ code, label = 'code', className }) {
   return (
-    <div className={cn('relative rounded-md border bg-muted', className)}>
+    <div className={cn('relative rounded-xl border bg-muted', className)}>
       <pre className="overflow-x-auto p-4 pr-24 font-mono text-sm" tabIndex={0}>
         <code>{code}</code>
       </pre>

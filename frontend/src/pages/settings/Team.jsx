@@ -48,9 +48,9 @@ export const ROLES = {
 
 function RoleGuide() {
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">What each role can do</CardTitle>
+        <CardTitle className="font-serif text-base">What each role can do</CardTitle>
       </CardHeader>
       <CardContent>
         <dl className="grid gap-3 sm:grid-cols-3">
@@ -85,9 +85,9 @@ function InviteForm() {
   }
 
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Invite someone</CardTitle>
+        <CardTitle className="font-serif text-base">Invite someone</CardTitle>
         <CardDescription>We email them a link that works for 7 days.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -257,9 +257,9 @@ export default function Team() {
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
-          <CardTitle className="text-lg">Members</CardTitle>
+          <CardTitle className="font-serif text-base">Members</CardTitle>
           <CardDescription>People who can sign in to this organization.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -291,9 +291,9 @@ export default function Team() {
 
       <InviteForm />
 
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
-          <CardTitle className="text-lg">Pending invitations</CardTitle>
+          <CardTitle className="font-serif text-base">Pending invitations</CardTitle>
         </CardHeader>
         <CardContent>
           {invites.isPending ? (

@@ -52,9 +52,9 @@ function Keys({ isAdmin }) {
   const keys = query.data?.items ?? [];
 
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Telemetry keys</CardTitle>
+        <CardTitle className="font-serif text-base">Telemetry keys</CardTitle>
         <CardDescription>
           Keys your apps use to send traces and logs. They can only send data. Create one per
           environment, for example production and staging.{' '}
@@ -171,9 +171,9 @@ function Redaction({ settings, isAdmin, save, saving }) {
   }
 
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Hide private data</CardTitle>
+        <CardTitle className="font-serif text-base">Hide private data</CardTitle>
         <CardDescription>
           Rules run before anything is stored, so private values never reach your dashboard. Scrambled
           (hashed) values stay the same each time, so you can still match them.
@@ -258,9 +258,9 @@ function Sampling({ settings, isAdmin, save, saving }) {
   }
 
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Keep less data (sampling)</CardTitle>
+        <CardTitle className="font-serif text-base">Keep less data (sampling)</CardTitle>
         <CardDescription>
           Save volume by keeping only part of your traces. Dropped data still counts toward your
           monthly volume because we received it. To save volume at the source, set a sampling ratio
@@ -305,9 +305,9 @@ function Usage({ settings }) {
   const u = settings.usage;
   const r = settings.retention;
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Usage and retention</CardTitle>
+        <CardTitle className="font-serif text-base">Usage and retention</CardTitle>
         <CardDescription>Traces, logs and metrics all count toward one monthly volume.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -325,7 +325,7 @@ function Usage({ settings }) {
           </>
         )}
         {r && (
-          <p className="text-base">
+          <p className="text-sm">
             Data is kept for <strong>{r.days} days</strong> on your {r.plan} plan.{' '}
             <Link to="/settings/plan" className="underline underline-offset-4">
               See plans

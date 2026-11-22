@@ -75,11 +75,11 @@ function TemplateGallery({ open, onOpenChange, onCreated }) {
 function RuleCard({ rule, canEdit, onEdit, onDelete }) {
   const action = useAction();
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+    <Card className="surface card-accent transition-shadow duration-150 hover:shadow-md">
+      <CardContent className="flex flex-col gap-4 p-5">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-semibold">{rule.name}</h2>
+            <h2 className="font-serif text-base font-semibold leading-tight">{rule.name}</h2>
             {rule.openIncidents > 0 && (
               <Badge variant="outline" className="gap-1.5">
                 <span className="size-2 rounded-full bg-destructive" aria-hidden="true" />
@@ -183,7 +183,7 @@ export default function RulesTab() {
           }
         />
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {items.map((rule) => (
             <li key={rule.id}>
               <RuleCard rule={rule} canEdit={isAdmin} onEdit={setEditing} onDelete={setRemoving} />

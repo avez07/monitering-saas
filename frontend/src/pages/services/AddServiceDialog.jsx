@@ -23,6 +23,7 @@ import {
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
+import LocalTestGuide from './LocalTestGuide';
 import InstallAgentDialog from './InstallAgentDialog';
 
 // Contract: docs/api/phase16.md (POST /api/services).
@@ -268,6 +269,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                   {(p) => <Input {...p} value={form.processName} onChange={(e) => set({ processName: e.target.value })} />}
                 </FormField>
               )}
+              <LocalTestGuide type={type} />
               {error && (
                 <p role="alert" className="text-sm font-medium text-destructive">
                   {error}

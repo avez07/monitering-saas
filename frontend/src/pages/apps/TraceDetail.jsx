@@ -15,7 +15,7 @@ function Attributes({ title, data }) {
   if (!entries.length) return null;
   return (
     <section aria-label={title}>
-      <h4 className="mb-2 text-sm font-semibold">{title}</h4>
+      <h4 className="mb-2 font-serif text-base font-semibold">{title}</h4>
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,14rem)_1fr]">
         {entries.map(([k, v]) => (
           <div key={k} className="contents">
@@ -30,9 +30,9 @@ function Attributes({ title, data }) {
 
 function SpanDetails({ span }) {
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="break-words text-base">{span.name}</CardTitle>
+        <CardTitle className="break-words font-serif text-base">{span.name}</CardTitle>
         <p className="text-sm text-muted-foreground">
           {span.service} · {span.kind} · {formatMs(span.durationMs)} · starts at{' '}
           {formatMs(span.startOffsetMs)}
@@ -51,7 +51,7 @@ function SpanDetails({ span }) {
         <Attributes title="About the service" data={span.resourceAttributes} />
         {span.events?.length > 0 && (
           <section aria-label="Events">
-            <h4 className="mb-2 text-sm font-semibold">Events</h4>
+            <h4 className="mb-2 font-serif text-base font-semibold">Events</h4>
             <ul className="space-y-3">
               {span.events.map((e, i) => (
                 <li key={i} className="rounded-md border p-3">
@@ -68,7 +68,7 @@ function SpanDetails({ span }) {
         )}
         {span.links?.length > 0 && (
           <section aria-label="Links">
-            <h4 className="mb-2 text-sm font-semibold">Linked traces</h4>
+            <h4 className="mb-2 font-serif text-base font-semibold">Linked traces</h4>
             <ul className="space-y-1 text-sm">
               {span.links.map((l, i) => (
                 <li key={i}>
@@ -121,7 +121,7 @@ export default function TraceDetail() {
   const root = rows[0]?.span;
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title={root?.name || 'Trace'}
         breadcrumbs={crumbs}
@@ -141,9 +141,9 @@ export default function TraceDetail() {
       </section>
       <CopyField value={trace.traceId} label="trace id" className="mb-6" />
 
-      <Card className="mb-6">
+      <Card className="surface card-accent mb-6">
         <CardHeader>
-          <CardTitle className="text-base">Timeline</CardTitle>
+          <CardTitle className="font-serif text-base">Timeline</CardTitle>
           <p className="text-sm text-muted-foreground">Select a step to see its details.</p>
         </CardHeader>
         <CardContent>
@@ -188,9 +188,9 @@ export default function TraceDetail() {
 
       {current && <SpanDetails span={current} />}
 
-      <Card className="mt-6">
+      <Card className="surface card-accent mt-6">
         <CardHeader>
-          <CardTitle className="text-base">Related logs</CardTitle>
+          <CardTitle className="font-serif text-base">Related logs</CardTitle>
         </CardHeader>
         <CardContent>
           {trace.logs?.length ? (
@@ -221,6 +221,6 @@ export default function TraceDetail() {
           )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }

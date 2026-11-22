@@ -48,6 +48,8 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        success: 'hsl(var(--success))',
+        warning: 'hsl(var(--warning))',
         chart: {
           1: 'hsl(var(--chart-1))',
           2: 'hsl(var(--chart-2))',
@@ -74,6 +76,7 @@ export default {
       fontFamily: {
         sans: ['var(--font-sans)'],
         serif: ['var(--font-serif)'],
+        display: ['var(--font-serif)'],
         mono: ['var(--font-mono)'],
       },
       boxShadow: {

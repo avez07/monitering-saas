@@ -84,7 +84,7 @@ export default function Containers() {
         <ErrorState title="We couldn't load your containers" error={error} onRetry={refetch} />
       ) : (
         <div className="space-y-4">
-          <div className="relative max-w-sm">
+          <div className="relative w-full sm:max-w-sm">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -101,7 +101,7 @@ export default function Containers() {
           <DataTable
             rows={rows}
             empty={
-              <p className="py-8 text-center text-muted-foreground">
+              <p className="py-12 text-center text-sm text-muted-foreground">
                 No container matches that search.
               </p>
             }
@@ -111,8 +111,8 @@ export default function Containers() {
                 header: 'Container',
                 cell: (c) => (
                   <div className="min-w-0">
-                    <p className="font-medium">{c.name}</p>
-                    <p className="text-sm text-muted-foreground">{c.image}</p>
+                    <p className="text-sm font-medium">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{c.image}</p>
                   </div>
                 ),
               },

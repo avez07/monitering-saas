@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import GuideSteps from './GuideSteps';
 import { dockerSteps } from './guide';
-import { DOCKER_DESKTOP_NOTE, DOCKER_PLATFORMS, WINDOWS_SHELLS, dockerCompose, dockerRun } from './model';
+import { DOCKER_DENIED_HELP, DOCKER_DESKTOP_NOTE, DOCKER_PLATFORMS, WINDOWS_SHELLS, dockerCompose, dockerRun } from './model';
 
 /** Group of mutually exclusive buttons. */
 export function Choice({ label, value, onChange, options }) {
@@ -76,6 +76,16 @@ export default function DockerPanel({ release, keyValue, apiUrl, docker }) {
         title="Install the YuktiOps agent with Docker"
         steps={dockerSteps({ command, compose: dockerCompose(common), desktop: platform !== 'linux' })}
       />
+      <Alert>
+        <AlertDescription className="space-y-2">
+          <p className="font-medium">{DOCKER_DENIED_HELP.title}</p>
+          <p>{DOCKER_DENIED_HELP.body}</p>
+          <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">{DOCKER_DENIED_HELP.build}</pre>
+          <p>
+            Or, if the package is private, run <code>{DOCKER_DENIED_HELP.login}</code> first.
+          </p>
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }

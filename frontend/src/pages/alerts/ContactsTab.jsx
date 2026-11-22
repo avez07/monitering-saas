@@ -50,16 +50,16 @@ function ContactCard({ contact, canEdit, onEdit, onDelete, onLink }) {
   }
 
   return (
-    <Card>
-      <CardContent className="space-y-3 p-5">
+    <Card className="surface card-accent transition-shadow duration-150 hover:shadow-md">
+      <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Icon className="size-5" aria-hidden="true" />
             </span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="font-semibold">{contact.name}</h2>
+                <h2 className="font-serif text-base font-semibold leading-tight">{contact.name}</h2>
                 <Badge variant="secondary">{typeLabel}</Badge>
                 <Badge variant="outline" className="gap-1.5">
                   <span
@@ -125,7 +125,7 @@ function ContactCard({ contact, canEdit, onEdit, onDelete, onLink }) {
         {result && (
           <p
             role="status"
-            className={`rounded-md border p-3 text-sm ${result.ok ? '' : 'border-destructive/50 text-destructive'}`}
+            className={`rounded-lg border bg-card p-3 text-sm ${result.ok ? '' : 'border-destructive/50 text-destructive'}`}
           >
             {result.ok
               ? 'The test message was delivered.'
@@ -162,7 +162,7 @@ export default function ContactsTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Alerts are sent to every contact below unless an alert is set to use only some of them.
           {restricted && (
             <>
@@ -195,7 +195,7 @@ export default function ContactsTab() {
           }
         />
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {items.map((contact) => (
             <li key={contact.id}>
               <ContactCard

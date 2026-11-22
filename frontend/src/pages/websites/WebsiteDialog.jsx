@@ -21,6 +21,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { FormField, notify } from '@/components/app';
+import { parseCurl, headersToLines } from '@/lib/curl';
+import LocalTestGuide from '@/pages/services/LocalTestGuide';
 import { INTERVALS, createWebsite, updateWebsite, useAction } from './api';
 
 const KINDS = [
@@ -68,7 +70,34 @@ export default function WebsiteDialog({ site, limits, onClose }) {
     failures: String(site?.failuresBeforeDown ?? 2),
   }));
   const [error, setError] = useState('');
+  const [curl, setCurl] = useState('');
+  const [curlInfo, setCurlInfo] = useState(null);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  function importCurl() {
+    const r = parseCurl(curl);
+    if (!r.ok) return setCurlInfo({ error: r.error });
+    const needsApi = r.method !== 'GET' || r.body !== null || Object.keys(r.headers).length > 0;
+    const notes = [...r.warnings];
+    if (r.body && r.body.length > 4096) notes.push('The body is longer than 4096 characters and was cut.');
+    if (editing && needsApi && form.type !== 'api')
+      notes.push('Headers, method and body only apply to an API check. Add a new API check to use them.');
+    setForm((f) => {
+      const type = !editing && needsApi && f.type !== 'api' ? 'api' : f.type;
+      const patch = { url: r.url };
+      if (type === 'api') {
+        patch.method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(r.method) ? r.method : 'GET';
+        patch.headers = headersToLines(r.headers);
+        patch.body = (r.body || '').slice(0, 4096);
+      }
+      return { ...f, type, ...patch };
+    });
+    const q = Object.keys(r.query).length;
+    setCurlInfo({
+      ok: `Filled in ${r.method} ${r.url.split('?')[0]}${q ? `, ${q} query parameter${q === 1 ? '' : 's'} kept in the address` : ''}.`,
+      notes,
+    });
+  }
 
   function submit(event) {
     event.preventDefault();
@@ -143,6 +172,36 @@ export default function WebsiteDialog({ site, limits, onClose }) {
                 ))}
               </RadioGroup>
             </fieldset>
+          )}
+
+          {form.type !== 'tcp' && (
+            <details className="rounded-lg border p-3">
+              <summary className="cursor-pointer text-sm font-medium">Paste cURL</summary>
+              <div className="mt-3 space-y-2">
+                <Textarea
+                  aria-label="curl command"
+                  rows={4}
+                  className="font-mono text-sm"
+                  placeholder={"curl -X POST 'https://api.example.com/health' -H 'Authorization: Bearer abc' -d '{\"ping\":true}'"}
+                  value={curl}
+                  onChange={(e) => setCurl(e.target.value)}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={importCurl} disabled={!curl.trim()}>
+                  Fill in the form
+                </Button>
+                {curlInfo?.error && (
+                  <p role="alert" className="text-sm font-medium text-destructive">{curlInfo.error}</p>
+                )}
+                {curlInfo?.ok && (
+                  <div role="status" className="text-sm text-muted-foreground">
+                    <p>{curlInfo.ok}</p>
+                    {curlInfo.notes.map((n) => (
+                      <p key={n}>{n}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
           )}
 
           {form.type === 'tcp' ? (
@@ -362,6 +421,7 @@ export default function WebsiteDialog({ site, limits, onClose }) {
             </p>
           )}
 
+          <LocalTestGuide type={form.type === 'api' ? 'api' : form.type === 'tcp' ? 'tcp' : 'website'} />
           {error && (
             <p role="alert" className="text-sm font-medium text-destructive">
               {error}{' '}

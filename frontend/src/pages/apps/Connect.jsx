@@ -24,12 +24,13 @@ import {
   installSteps,
 } from './model';
 import { SelectField } from './shared';
+import LocalTestGuide from '@/pages/services/LocalTestGuide';
 
 function Step({ number, title, description, children }) {
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="flex items-center gap-3 text-lg">
+        <CardTitle className="flex items-center gap-3 font-serif text-base">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-foreground" aria-hidden="true">
             {number}
           </span>
@@ -84,6 +85,21 @@ function KeyStep({ connection, fresh, onCreated }) {
             </li>
           ))}
         </ul>
+      )}
+      {create.isError && (
+        <Alert variant="destructive" role="alert">
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>We could not create the key</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>
+              {create.error?.message}
+              {create.error?.status ? ` (error ${create.error.status})` : ''}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => create.mutate()} disabled={create.isPending}>
+              Try again
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
       {isAdmin ? (
         <form
@@ -167,7 +183,7 @@ export default function Connect() {
   const isCollector = lang === 'collector';
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title="Connect your app"
         description="Send traces and logs with the standard OpenTelemetry tools. Most apps need only a few settings and no code changes."
@@ -211,13 +227,13 @@ export default function Connect() {
             <TabsContent value="setup" className="space-y-4">
               {isCollector ? (
                 <>
-                  <p className="text-base text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Save this as <code>otel-config.yaml</code>. It receives data from your apps on
                     this machine, ships your log files, and forwards everything to YuktiOps. Change
                     the log path to where your app writes logs.
                   </p>
                   <CodeBlock code={collectorConfig({ endpoint, key })} label="Collector config" />
-                  <p className="text-base text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Then run it, and point your apps at <code>http://127.0.0.1:4318</code>.
                   </p>
                   <CodeBlock code={COLLECTOR_RUN} label="Collector command" />
@@ -250,7 +266,7 @@ export default function Connect() {
 
             <TabsContent value="customise" className="space-y-6">
               {isCollector ? (
-                <p className="text-base text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   Customising happens in your app. Pick a language above to see examples for custom
                   spans, ids, errors and sampling.
                 </p>
@@ -267,8 +283,13 @@ export default function Connect() {
           </Tabs>
         </Step>
 
+        <div className="space-y-2">
+          <LocalTestGuide type="frontend" />
+          <LocalTestGuide type="backend" />
+          <LocalTestGuide type="worker" />
+        </div>
         <Waiting connection={connection} />
       </div>
-    </>
+    </div>
   );
 }

@@ -20,7 +20,7 @@ export default function Alerts() {
       ? 'contacts'
       : 'rules';
   return (
-    <div>
+    <div className="page">
       <PageHeader
         title="Alerts"
         description="Tell us what to watch for and where to send the message. We only alert when something really needs you."
@@ -38,13 +38,13 @@ export default function Alerts() {
             ))}
           </TabsList>
         </div>
-        <TabsContent value="rules" className="mt-6">
+        <TabsContent value="rules" className="mt-6 animate-in fade-in duration-200">
           <RulesTab />
         </TabsContent>
-        <TabsContent value="history" className="mt-6">
+        <TabsContent value="history" className="mt-6 animate-in fade-in duration-200">
           <HistoryTab />
         </TabsContent>
-        <TabsContent value="contacts" className="mt-6">
+        <TabsContent value="contacts" className="mt-6 animate-in fade-in duration-200">
           <ContactsTab />
         </TabsContent>
       </Tabs>

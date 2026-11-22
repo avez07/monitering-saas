@@ -57,7 +57,7 @@ export default function ServiceList() {
   ];
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title="Apps"
         description="Every app that sends OpenTelemetry data, with how fast it is and how often it fails."
@@ -69,7 +69,7 @@ export default function ServiceList() {
           </Button>
         }
       />
-      <div className="mb-4 max-w-xs">
+      <div className="mb-4 w-full sm:w-64">
         <RangeSelect value={range} onChange={(v) => setParams({ range: v })} />
       </div>
       {query.isPending ? (
@@ -97,6 +97,6 @@ export default function ServiceList() {
           )}
         </>
       )}
-    </>
+    </div>
   );
 }

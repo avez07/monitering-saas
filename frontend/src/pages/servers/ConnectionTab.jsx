@@ -77,7 +77,7 @@ function Problem({ event }) {
   const meta = SEVERITY[event.severity] || SEVERITY.info;
   const Icon = meta.icon;
   return (
-    <li className="rounded-lg border p-4">
+    <li className="surface p-4">
       <div className="flex items-start gap-3">
         <Icon className={cn('mt-0.5 size-5 shrink-0', meta.className)} aria-hidden="true" />
         <div className="min-w-0 flex-1 space-y-3">
@@ -139,7 +139,7 @@ export default function ConnectionTab({ server, connection: query }) {
   return (
     <div className="space-y-6">
       <Card>
-        <CardContent className="flex items-start gap-4 p-5">
+        <CardContent className="flex items-start gap-4 p-4">
           <SummaryIcon
             className={cn(
               'mt-1 size-8 shrink-0',
@@ -150,7 +150,7 @@ export default function ConnectionTab({ server, connection: query }) {
             aria-hidden="true"
           />
           <div>
-            <h2 className="text-xl font-semibold">{summary.title}</h2>
+            <h2 className="font-serif text-base font-semibold tracking-tight">{summary.title}</h2>
             <p className="text-muted-foreground">{summary.text}</p>
             <p className="mt-2 font-medium" aria-live="polite">
               {lastData(data)}
@@ -166,7 +166,7 @@ export default function ConnectionTab({ server, connection: query }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Connection steps</CardTitle>
+          <CardTitle className="font-serif text-base font-semibold tracking-tight">Connection steps</CardTitle>
         </CardHeader>
         <CardContent>
           <Steps steps={data.steps || []} />
@@ -175,7 +175,7 @@ export default function ConnectionTab({ server, connection: query }) {
 
       {data.problems?.length > 0 && (
         <section aria-labelledby="problems-title" className="space-y-3">
-          <h2 id="problems-title" className="text-lg font-semibold">
+          <h2 id="problems-title" className="font-serif text-base font-semibold tracking-tight">
             Problems to fix
           </h2>
           <ul className="space-y-3">
@@ -189,8 +189,8 @@ export default function ConnectionTab({ server, connection: query }) {
       {data.diagnosis && (
         <Card className="border-chart-4/60">
           <CardHeader>
-            <CardTitle className="text-base">{data.diagnosis.title}</CardTitle>
-            <CardDescription className="text-base">{data.diagnosis.explanation}</CardDescription>
+            <CardTitle className="font-serif text-base font-semibold tracking-tight">{data.diagnosis.title}</CardTitle>
+            <CardDescription className="text-sm">{data.diagnosis.explanation}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -222,7 +222,7 @@ export default function ConnectionTab({ server, connection: query }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Useful commands</CardTitle>
+          <CardTitle className="font-serif text-base font-semibold tracking-tight">Useful commands</CardTitle>
           <CardDescription>
             Run these on {server.name} in a terminal. The agent runs in the background.
           </CardDescription>
@@ -248,7 +248,7 @@ export default function ConnectionTab({ server, connection: query }) {
             Show recent activity ({olderEvents.length})
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ul className="mt-3 divide-y rounded-lg border">
+            <ul className="mt-3 divide-y surface">
               {olderEvents.map((e) => (
                 <li key={e.id} className="flex flex-wrap justify-between gap-2 p-3 text-sm">
                   <span>{e.title || e.code}</span>

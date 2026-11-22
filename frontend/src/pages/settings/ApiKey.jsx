@@ -67,9 +67,9 @@ export default function ApiKey() {
         </Alert>
       )}
 
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
-          <CardTitle className="text-lg">Account API key</CardTitle>
+          <CardTitle className="font-serif text-base">Account API key</CardTitle>
           <CardDescription>
             One key for your whole account. It is only used once per server, to connect it. Each
             server then gets its own credential.
@@ -108,7 +108,7 @@ export default function ApiKey() {
             </>
           ) : (
             <div className="flex flex-col items-start gap-3">
-              <p className="text-base text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 You don&apos;t have an active API key. Create one to connect servers.
               </p>
               <Button

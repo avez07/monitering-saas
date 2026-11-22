@@ -137,13 +137,13 @@ export default function Logs() {
   const filtered = Boolean(f.q || f.service || f.severity || f.traceId || f.attributes.length);
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title="Logs"
         description="Search the logs your apps send. Open the trace behind any line."
         breadcrumbs={[{ label: 'Apps', to: '/apps' }, { label: 'Logs' }]}
       />
-      <Card className="mb-6">
+      <Card className="surface card-accent mb-6">
         <CardContent className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
             <Label htmlFor="f-q">Search</Label>
@@ -223,6 +223,6 @@ export default function Logs() {
           )}
         </>
       )}
-    </>
+    </div>
   );
 }

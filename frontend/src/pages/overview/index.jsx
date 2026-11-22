@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/lib/hooks';
+import OverviewCharts from './OverviewCharts';
 import { useServers } from '@/pages/servers/api';
 import { bySeverity, serverReason, serverStatus, statusLabel } from '@/pages/servers/status';
 
@@ -65,9 +66,9 @@ function attentionItems(servers, websites, incidents) {
 
 function AttentionList({ list, loading }) {
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">What needs attention</CardTitle>
+        <CardTitle className="font-serif text-base font-semibold tracking-tight">What needs attention</CardTitle>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -76,8 +77,8 @@ function AttentionList({ list, loading }) {
             <Skeleton className="h-14 w-full" />
           </div>
         ) : list.length === 0 ? (
-          <p className="flex items-center gap-3 py-4 text-base">
-            <CheckCircle2 className="size-6 shrink-0 text-chart-2" aria-hidden="true" />
+          <p className="flex items-center gap-3 py-4 text-sm">
+            <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden="true" />
             Everything looks good. Nothing needs your attention right now.
           </p>
         ) : (
@@ -90,7 +91,7 @@ function AttentionList({ list, loading }) {
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status={item.status} label={item.label} />
-                    <span className="font-medium">{item.title}</span>
+                    <span className="text-sm font-medium">{item.title}</span>
                   </div>
                   {item.text && <p className="text-sm text-muted-foreground">{item.text}</p>}
                 </div>
@@ -109,24 +110,24 @@ function AttentionList({ list, loading }) {
 function RecentAlerts({ summary }) {
   const recent = summary?.recent ?? [];
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg">Recent alerts</CardTitle>
+        <CardTitle className="font-serif text-base font-semibold tracking-tight">Recent alerts</CardTitle>
         <Button asChild variant="link" size="sm">
           <Link to="/alerts">See all</Link>
         </Button>
       </CardHeader>
       <CardContent>
         {recent.length === 0 ? (
-          <p className="text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             No alerts yet. We'll list them here when they happen.
           </p>
         ) : (
           <ul className="divide-y">
             {recent.map((i) => (
-              <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+              <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <div className="min-w-0">
-                  <p className="font-medium">{i.name}</p>
+                  <p className="text-sm font-medium">{i.name}</p>
                   <p className="text-sm text-muted-foreground">
                     {SEVERITY_WORD[i.severity] || 'Alert'} ·{' '}
                     {i.state === 'resolved'
@@ -190,13 +191,13 @@ export default function Overview() {
           text="Install the small YuktiOps agent and you'll see CPU, memory, disk and alerts here within a minute."
           action={{ label: 'Add your first server', to: '/add-server' }}
         />
-        <p className="mt-4 text-center text-muted-foreground">
+        <p className="mt-4 text-center text-sm text-muted-foreground">
           Running an app instead?{' '}
           <Link to="/apps/connect" className="font-medium text-foreground underline underline-offset-4">
             Connect your app with OpenTelemetry
           </Link>
         </p>
-        <p className="mt-2 text-center text-muted-foreground">
+        <p className="mt-2 text-center text-sm text-muted-foreground">
           No server to install on?{' '}
           <Link to="/websites" className="font-medium text-foreground underline underline-offset-4">
             Monitor a website instead
@@ -228,7 +229,7 @@ export default function Overview() {
       {settling ? (
         <StatGridSkeleton />
       ) : (
-        <section aria-label="Summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section aria-label="Summary" className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
           <StatCard
             label="Servers"
             icon={Server}
@@ -269,7 +270,9 @@ export default function Overview() {
         </section>
       )}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[3fr_2fr]">
+      {!settling && <OverviewCharts servers={servers} websites={websites} />}
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-[3fr_2fr] 2xl:grid-cols-[2fr_1fr]">
         <AttentionList list={attention} loading={settling} />
         <RecentAlerts summary={summary} />
       </div>

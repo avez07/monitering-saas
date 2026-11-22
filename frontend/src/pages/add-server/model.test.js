@@ -14,6 +14,14 @@ test('linux: host mounts, docker socket, backslash continuations', () => {
   assert.ok(!out.startsWith('MSYS_NO_PATHCONV'));
 });
 
+test('docker socket comes with the group the non-root agent needs', () => {
+  assert.match(dockerRun({ ...base, platform: 'linux' }), /--group-add \$\(stat -c '%g' \/var\/run\/docker\.sock\)/);
+  assert.match(dockerRun({ ...base, platform: 'windows' }), /--group-add 0/);
+  assert.match(dockerRun({ ...base, platform: 'mac' }), /--group-add 0/);
+  assert.match(dockerCompose(base), /group_add:/);
+  assert.ok(!dockerRun({ ...base, docker: false, platform: 'windows' }).includes('group-add'));
+});
+
 test('linux: no docker socket when containers are off', () => {
   assert.ok(!dockerRun({ ...base, docker: false }).includes('docker.sock'));
 });
@@ -34,7 +42,12 @@ test('windows Git Bash: MSYS_NO_PATHCONV=1 prefix and backslashes', () => {
 });
 
 test('macOS: same as Linux shell syntax', () => {
-  assert.equal(dockerRun({ ...base, platform: 'mac' }), dockerRun({ ...base, platform: 'linux' }));
+  const strip = (s) =>
+    s
+      .split('\n')
+      .filter((l) => !l.includes('--group-add'))
+      .join('\n');
+  assert.equal(strip(dockerRun({ ...base, platform: 'mac' })), strip(dockerRun({ ...base, platform: 'linux' })));
 });
 
 test('local API url is passed through', () => {

@@ -109,7 +109,7 @@ export default function AddServer() {
   const current = STEPS[step];
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="w-full">
       <PageHeader
         title="Add a server"
         description="Connect a server in a few minutes. You can add more later."
@@ -117,7 +117,7 @@ export default function AddServer() {
       <Stepper step={step} />
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl" id="step-title" tabIndex={-1}>
+          <CardTitle className="text-base tracking-tight" id="step-title" tabIndex={-1}>
             Step {step + 1} of {STEPS.length}: {current.text}
           </CardTitle>
           {step === 0 && (

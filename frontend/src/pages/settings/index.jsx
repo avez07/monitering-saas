@@ -18,12 +18,12 @@ const tabs = [
 
 export default function Settings() {
   return (
-    <div>
+    <div className="page">
       <PageHeader title="Settings" description="Your team, API key, telemetry, plan and account." />
       <div className="flex flex-col gap-6 md:flex-row md:gap-10">
         <nav
           aria-label="Settings sections"
-          className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:w-52 md:flex-col md:overflow-visible md:p-0"
+          className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:w-48 md:flex-col md:overflow-visible md:p-0"
         >
           {tabs.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -31,9 +31,9 @@ export default function Settings() {
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   isActive
-                    ? 'bg-accent text-accent-foreground'
+                    ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
                 )
               }
@@ -43,7 +43,7 @@ export default function Settings() {
             </NavLink>
           ))}
         </nav>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 animate-in fade-in duration-200">
           <Routes>
             <Route index element={<Navigate to="/settings/team" replace />} />
             <Route path="team" element={<Team />} />

@@ -1,118 +1,128 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, Plus, Settings, User } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ChevronRight, Menu, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import { useSession } from '@/lib/session';
-import { Logo } from './Logo';
-import { SidebarNav } from './Sidebar';
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { NAV, NAV_APPS } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
+import { UserMenu } from './UserMenu';
 
-const initials = (name = '?') =>
-  name
-    .split(/\s+/)
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+export { UserMenu };
 
-export function Topbar() {
-  const { user, organization, organizations, switchOrganization, signOut } = useSession();
+const ALL = [...NAV, ...NAV_APPS, { to: '/add-server', label: 'Add server' }];
+
+/** Breadcrumb trail for the current path: the matching section, then "Details" for deeper pages. */
+function useCrumbs() {
+  const { pathname } = useLocation();
+  return useMemo(() => {
+    const match = ALL.filter((i) =>
+      i.to === '/' ? pathname === '/' : pathname === i.to || pathname.startsWith(`${i.to}/`),
+    ).sort((a, b) => b.to.length - a.to.length)[0];
+    if (!match) return [{ label: 'YuktiOps' }];
+    const deeper = match.to !== '/' && pathname.replace(/\/$/, '') !== match.to;
+    return deeper ? [{ label: match.label, to: match.to }, { label: 'Details' }] : [{ label: match.label }];
+  }, [pathname]);
+}
+
+/** Command palette: jump to any page. Opens with Ctrl/Cmd+K. */
+function CommandMenu({ open, onOpenChange }) {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const go = (to) => {
+    onOpenChange(false);
+    navigate(to);
+  };
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur sm:px-6">
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu">
-            <Menu className="size-5" aria-hidden="true" />
-          </Button>
-        </SheetTrigger>
-        <SheetContent
-          side="left"
-          className="w-72 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground"
-        >
-          <SheetHeader className="px-6 py-4 text-left">
-            <SheetTitle>
-              <Logo />
-            </SheetTitle>
-            <SheetDescription className="sr-only">Main navigation</SheetDescription>
-          </SheetHeader>
-          <SidebarNav onNavigate={() => setOpen(false)} />
-        </SheetContent>
-      </Sheet>
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <CommandInput placeholder="Search pages and actions..." />
+      <CommandList>
+        <CommandEmpty>No results.</CommandEmpty>
+        <CommandGroup heading="Go to">
+          {[...NAV, ...NAV_APPS].map(({ to, label, icon: Icon }) => (
+            <CommandItem key={to} value={label} onSelect={() => go(to)}>
+              <Icon className="mr-2 size-4" aria-hidden="true" /> {label}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandGroup heading="Actions">
+          <CommandItem value="Add server" onSelect={() => go('/add-server')}>
+            <Plus className="mr-2 size-4" aria-hidden="true" /> Add server
+          </CommandItem>
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  );
+}
 
-      <p
-        className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground"
-        title="Your organization"
+/** `onOpenMenu` opens the off-canvas navigation sheet (phones/tablets). */
+export function Topbar({ onOpenMenu }) {
+  const crumbs = useCrumbs();
+  const [cmdOpen, setCmdOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCmdOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border/70 bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
+      <Button variant="ghost" size="icon" className="-ml-2 lg:hidden" aria-label="Open menu" onClick={onOpenMenu}>
+        <Menu className="size-5" aria-hidden="true" />
+      </Button>
+      <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+        {crumbs.map((c, i) => (
+          <span key={c.label} className="flex min-w-0 items-center gap-1.5">
+            {i > 0 && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+            {c.to ? (
+              <Link to={c.to} className="truncate text-muted-foreground transition-colors hover:text-foreground">
+                {c.label}
+              </Link>
+            ) : (
+              <span className="truncate font-medium text-foreground" aria-current="page">
+                {c.label}
+              </span>
+            )}
+          </span>
+        ))}
+      </nav>
+
+      <button
+        type="button"
+        onClick={() => setCmdOpen(true)}
+        aria-label="Search"
+        className="hidden h-9 w-64 items-center gap-2 rounded-xl border border-input bg-card px-3 text-[13px] text-muted-foreground transition-colors duration-150 hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
       >
-        {organization?.name}
-      </p>
+        <Search className="size-3.5" aria-hidden="true" />
+        <span className="flex-1 text-left">Search...</span>
+        <kbd className="rounded-md border bg-muted px-1.5 font-mono text-[10px]">Ctrl K</kbd>
+      </button>
+      <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Search" onClick={() => setCmdOpen(true)}>
+        <Search className="size-[18px]" aria-hidden="true" />
+      </Button>
+      <CommandMenu open={cmdOpen} onOpenChange={setCmdOpen} />
 
       <Button asChild size="sm" className="shrink-0">
         <Link to="/add-server">
-          <Plus className="size-4" aria-hidden="true" /> Add server
+          <Plus className="size-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Add server</span>
+          <span className="sr-only sm:hidden">Add server</span>
         </Link>
       </Button>
-      <ThemeToggle />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="rounded-full" aria-label={`${initials(user?.name)} account menu`}>
-            <Avatar className="size-8">
-              <AvatarFallback className="text-xs">{initials(user?.name)}</AvatarFallback>
-            </Avatar>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuLabel className="font-normal">
-            <p className="truncate text-sm font-medium">{user?.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
-          </DropdownMenuLabel>
-          {organizations.length > 1 && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Switch organization
-              </DropdownMenuLabel>
-              {organizations.map((org) => (
-                <DropdownMenuItem key={org.id} onSelect={() => switchOrganization(org.id)}>
-                  <span className="truncate">{org.name}</span>
-                  {org.id === organization?.id && (
-                    <span className="ml-auto text-xs text-muted-foreground">Current</span>
-                  )}
-                </DropdownMenuItem>
-              ))}
-            </>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => navigate('/settings/account')}>
-            <User className="mr-2 size-4" aria-hidden="true" /> Account
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => navigate('/settings')}>
-            <Settings className="mr-2 size-4" aria-hidden="true" /> Settings
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={signOut}>
-            <LogOut className="mr-2 size-4" aria-hidden="true" /> Sign out
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-1">
+        <ThemeToggle />
+        <UserMenu />
+      </div>
     </header>
   );
 }

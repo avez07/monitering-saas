@@ -17,7 +17,7 @@ export function VerifyBanner() {
     <div
       role="status"
       data-testid="verify-banner"
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted px-4 py-2 text-sm text-foreground sm:px-6 lg:px-8"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/70 bg-accent/60 px-4 py-2 text-sm text-foreground sm:px-6 lg:px-8"
     >
       <MailWarning className="size-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1">

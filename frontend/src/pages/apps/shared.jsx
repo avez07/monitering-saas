@@ -9,7 +9,7 @@ import { appStatus } from './model';
 import { statusInfo } from '@/lib/status';
 
 export const selectClass =
-  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm';
+  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /** Labelled native select. options: [{ value, label }] */
 export function SelectField({ id, label, value, onChange, options, className }) {
@@ -36,8 +36,8 @@ export function AppStatus({ status }) {
   const info = appStatus(status);
   const s = statusInfo(info.key);
   return (
-    <Badge variant="outline" className="gap-1.5 whitespace-nowrap py-0.5 text-sm font-medium">
-      <span className={cn('size-2 rounded-full', s.dot)} aria-hidden="true" />
+    <Badge variant="outline" className="gap-1.5 whitespace-nowrap py-0.5 text-xs font-medium">
+      <span className={cn('size-1.5 rounded-full', s.dot)} aria-hidden="true" />
       {info.label}
     </Badge>
   );

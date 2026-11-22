@@ -195,7 +195,7 @@ function ExistingServer() {
         )}
       </FormField>
       {id && settings && (
-        <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+        <div className="flex items-center justify-between gap-4 surface-muted p-3">
           <label htmlFor="containers-switch" className="text-sm font-medium">
             Monitor Docker containers on this server
           </label>
@@ -207,14 +207,53 @@ function ExistingServer() {
           />
         </div>
       )}
-      {id && settings && on && (
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            The agent needs permission to talk to Docker. If containers do not appear, run this on
-            that server:
-          </p>
+      {id && settings && on && <PermissionHelp />}
+    </div>
+  );
+}
+
+const SOCKET_FLAG = '-v /var/run/docker.sock:/var/run/docker.sock:ro --group-add 0';
+
+/** If containers do not appear: the fix depends on how the agent runs, not on the operating system you type in. */
+function PermissionHelp() {
+  const [how, setHow] = useState('package');
+  return (
+    <div className="space-y-3 text-sm text-muted-foreground">
+      <p>
+        The agent needs permission to talk to Docker. If containers do not appear, pick how the
+        agent runs on that server:
+      </p>
+      <div role="group" aria-label="How the agent runs" className="flex flex-wrap gap-2">
+        <Button size="sm" variant={how === 'package' ? 'default' : 'outline'} aria-pressed={how === 'package'} onClick={() => setHow('package')}>
+          Linux install (script, .deb, .rpm)
+        </Button>
+        <Button size="sm" variant={how === 'docker' ? 'default' : 'outline'} aria-pressed={how === 'docker'} onClick={() => setHow('docker')}>
+          Docker container (Linux, Windows, Mac)
+        </Button>
+      </div>
+      {how === 'package' ? (
+        <>
+          <p>Run this on that Linux server (it lets the agent's own user read the Docker socket):</p>
           <CopyField value="sudo usermod -aG docker yuktiops && sudo systemctl restart yuktiops-agent" label="permission command" />
-        </div>
+        </>
+      ) : (
+        <>
+          <p>
+            In a container there is no <code>yuktiops</code> user to change. Check that the container was started
+            with the Docker socket, then check the agent:
+          </p>
+          <p>
+            The agent in the container is not root, and the Docker socket belongs to root. Both flags are needed. On a
+            Linux server use <code>--group-add $(stat -c '%g' /var/run/docker.sock)</code> instead of{' '}
+            <code>--group-add 0</code>.
+          </p>
+          <CopyField value={SOCKET_FLAG} label="flags the docker run command needs" />
+          <CopyField value="docker exec yuktiops-agent yuktiops-agent doctor" label="check command" />
+          <p>
+            Missing the flag? Remove the container (<code>docker rm -f yuktiops-agent</code>) and run the command from
+            <strong> Add a Docker host</strong> again. It includes the flag for PowerShell, Command Prompt, bash and macOS.
+          </p>
+        </>
       )}
     </div>
   );

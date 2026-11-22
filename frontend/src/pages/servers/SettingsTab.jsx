@@ -77,7 +77,7 @@ function ServicesEditor({ services, onChange, disabled }) {
           None yet. Add things like nginx or MySQL and you'll see them under Services.
         </p>
       ) : (
-        <ul className="mb-3 divide-y rounded-md border">
+        <ul className="mb-3 divide-y surface-muted">
           {services.map((x) => (
             <li key={`${x.kind}-${x.name}`} className="flex items-center justify-between gap-3 p-3 text-sm">
               <span className="min-w-0">
@@ -150,7 +150,7 @@ function RenameCard({ server, canEdit }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Name</CardTitle>
+        <CardTitle className="font-serif text-base font-semibold tracking-tight">Name</CardTitle>
         <CardDescription>
           This is only the name shown here. The server's own name ({server.hostname}) stays the same.
         </CardDescription>
@@ -222,7 +222,7 @@ function ConfigCard({ server, canEdit }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">What this server reports</CardTitle>
+        <CardTitle className="font-serif text-base font-semibold tracking-tight">What this server reports</CardTitle>
         <CardDescription>
           Changes reach the agent by themselves. You don't need to log in to the server.
         </CardDescription>
@@ -259,7 +259,7 @@ function ConfigCard({ server, canEdit }) {
             <legend className="mb-2 text-sm font-medium">What to collect</legend>
             <ul className="grid gap-2 sm:grid-cols-2">
               {COLLECTORS.map(([key, label]) => (
-                <li key={key} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                <li key={key} className="flex items-center justify-between gap-3 surface-muted p-3">
                   <label htmlFor={`col-${key}`} className="text-sm">
                     {label}
                   </label>
@@ -273,7 +273,7 @@ function ConfigCard({ server, canEdit }) {
               ))}
             </ul>
           </fieldset>
-          <div className="space-y-2 rounded-md border p-3">
+          <div className="space-y-2 surface-muted p-3">
             <div className="flex items-center justify-between gap-3">
               <label htmlFor="col-docker" className="text-sm font-medium">
                 Containers (Docker)
@@ -326,7 +326,7 @@ export default function SettingsTab({ server, commands }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Commands for this server</CardTitle>
+          <CardTitle className="font-serif text-base font-semibold tracking-tight">Commands for this server</CardTitle>
           <CardDescription>Run these in a terminal on the server.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -348,7 +348,7 @@ export default function SettingsTab({ server, commands }) {
       {isAdmin && (
         <Card className="border-destructive/50">
           <CardHeader>
-            <CardTitle className="text-base">Remove this server</CardTitle>
+            <CardTitle className="font-serif text-base font-semibold tracking-tight">Remove this server</CardTitle>
             <CardDescription>
               We stop accepting data from it and delete it from your dashboard. The agent stays
               installed until you run the uninstall command above.

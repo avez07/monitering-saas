@@ -24,9 +24,9 @@ export default function BillingProfile({ profile }) {
   });
 
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-lg">Billing details</CardTitle>
+        <CardTitle className="font-serif text-base">Billing details</CardTitle>
         <CardDescription>Shown on your invoices.</CardDescription>
       </CardHeader>
       <CardContent>

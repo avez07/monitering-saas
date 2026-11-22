@@ -10,7 +10,7 @@ const SOON = [
   { id: 'macos', label: 'macOS' },
 ];
 
-const card = 'flex items-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors';
+const card = 'flex items-start gap-3 surface card-accent p-4 text-left transition-colors';
 
 export default function StepWhere({ value, onChange }) {
   return (
@@ -19,7 +19,7 @@ export default function StepWhere({ value, onChange }) {
         value={value}
         onValueChange={onChange}
         aria-label="Where does your server run?"
-        className="grid gap-3 sm:grid-cols-2"
+        className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4"
       >
         {SYSTEMS.map((s) => (
           <label
@@ -40,7 +40,7 @@ export default function StepWhere({ value, onChange }) {
         ))}
       </RadioGroup>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         {SOON.map((s) => (
           <div key={s.id} className={cn(card, 'opacity-70')} aria-disabled="true">
             <span className="flex-1 font-medium">{s.label}</span>

@@ -67,7 +67,7 @@ export default function ServiceList() {
   }, [all, search]);
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title="Services"
         description="Things running on your servers, like web servers and databases. Problems are shown first."
@@ -85,8 +85,8 @@ export default function ServiceList() {
       ) : error ? (
         <ErrorState title="We couldn't load your services" error={error} onRetry={refetch} />
       ) : (
-        <div className="space-y-4">
-          <div className="relative max-w-sm">
+        <div className="space-y-5">
+          <div className="relative w-full sm:max-w-xs">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -95,7 +95,7 @@ export default function ServiceList() {
               type="search"
               aria-label="Search services"
               placeholder="Search by name or server"
-              className="pl-9"
+              className="h-9 pl-9"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -114,11 +114,11 @@ export default function ServiceList() {
                 cell: (s) => (
                   <div className="min-w-0">
                     <p className="font-medium">
-                      <Link to={`/services/${s.id}`} className="underline-offset-4 hover:underline">
+                      <Link to={`/services/${s.id}`} className="transition-colors hover:text-primary">
                         {s.name}
                       </Link>
                     </p>
-                    {s.detail && <p className="text-sm text-muted-foreground">{s.detail}</p>}
+                    {s.detail && <p className="text-xs text-muted-foreground">{s.detail}</p>}
                   </div>
                 ),
               },
@@ -154,6 +154,6 @@ export default function ServiceList() {
           />
         </div>
       )}
-    </>
+    </div>
   );
 }

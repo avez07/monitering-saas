@@ -10,19 +10,14 @@ import { cn } from '@/lib/utils';
  */
 export function EmptyState({ icon: Icon, title, text, action, className }) {
   return (
-    <div
-      className={cn(
-        'flex flex-col items-center rounded-lg border border-dashed px-6 py-12 text-center',
-        className,
-      )}
-    >
+    <div className={cn('empty-state', className)}>
       {Icon && (
-        <span className="mb-4 flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Icon className="size-6" aria-hidden="true" />
+        <span className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Icon className="size-5" aria-hidden="true" />
         </span>
       )}
       <h2 className="text-lg font-semibold">{title}</h2>
-      {text && <p className="mt-1 max-w-md text-base text-muted-foreground">{text}</p>}
+      {text && <p className="mt-1 max-w-md text-sm text-muted-foreground">{text}</p>}
       {action && (
         <div className="mt-5">
           {action.to ? (
@@ -58,15 +53,15 @@ export function ErrorState({ title = 'Something went wrong', error, onRetry, cla
     <div
       role="alert"
       className={cn(
-        'flex flex-col items-center rounded-lg border border-destructive/40 px-6 py-10 text-center',
+        'flex flex-col items-center rounded-2xl border border-destructive/40 bg-destructive/5 px-6 py-10 text-center',
         className,
       )}
     >
-      <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-muted text-destructive">
-        <AlertTriangle className="size-6" aria-hidden="true" />
+      <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+        <AlertTriangle className="size-5" aria-hidden="true" />
       </span>
       <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="mt-1 max-w-md text-base text-muted-foreground">
+      <p className="mt-1 max-w-md text-sm text-muted-foreground">
         {error?.message || (typeof error === 'string' ? error : 'Please try again in a moment.')}
       </p>
       <ErrorDetails error={error} />
@@ -101,7 +96,7 @@ export function CardSkeleton({ className }) {
     <Card className={className} aria-hidden="true">
       <CardContent className="space-y-3 p-5">
         <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-8 w-20" />
+        <Skeleton className="h-9 w-24" />
         <Skeleton className="h-3 w-32" />
       </CardContent>
     </Card>
@@ -122,7 +117,7 @@ export function TableSkeleton({ rows = 5 }) {
   return (
     <div className="space-y-2" role="status" aria-label="Loading">
       {Array.from({ length: rows }, (_, i) => (
-        <Skeleton key={i} className="h-12 w-full" />
+        <Skeleton key={i} className="h-11 w-full" />
       ))}
     </div>
   );

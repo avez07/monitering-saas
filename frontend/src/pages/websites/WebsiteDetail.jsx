@@ -121,14 +121,14 @@ export default function WebsiteDetail() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="page space-y-6">
       <PageHeader
         title={s.name}
         description={`${TYPE_LABELS[s.type]} · ${target} · checked ${INTERVAL_TEXT(s.intervalSeconds)}`}
         breadcrumbs={[{ label: 'Websites & APIs', to: '/websites' }, { label: s.name }]}
         actions={
           <>
-            <StatusBadge status={info.status} label={info.label} className="px-3 py-1.5" />
+            <StatusBadge status={info.status} label={info.label} className="px-2.5 py-1" />
             {isAdmin && (
               <>
                 <Button variant="outline" onClick={runCheck} disabled={action.isPending || paused}>
@@ -171,7 +171,7 @@ export default function WebsiteDetail() {
       {checkResult && (
         <p
           role="status"
-          className={`rounded-md border p-3 text-sm ${checkResult.ok ? '' : 'border-destructive/50'}`}
+          className={`rounded-lg border bg-card p-3 text-sm ${checkResult.ok ? '' : 'border-destructive/50'}`}
         >
           {checkResult.ok
             ? `Check passed${checkResult.statusCode ? ` (code ${checkResult.statusCode})` : ''}, answered in ${formatMs(checkResult.latencyMs)}.`
@@ -271,9 +271,9 @@ export default function WebsiteDetail() {
       </ChartCard>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="surface card-accent">
           <CardHeader>
-            <CardTitle className="text-base">Recent checks</CardTitle>
+            <CardTitle className="font-serif text-base">Recent checks</CardTitle>
           </CardHeader>
           <CardContent>
             {checks.data?.recent?.length ? (
@@ -300,6 +300,14 @@ export default function WebsiteDetail() {
                       {c.latencyMs == null ? '' : `${formatMs(c.latencyMs)} · `}
                       <RelativeTime value={c.time} />
                     </span>
+                    {!c.ok && c.detail && (
+                      <pre
+                        data-testid="check-detail"
+                        className="w-full whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs text-muted-foreground"
+                      >
+                        {c.detail}
+                      </pre>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -311,9 +319,9 @@ export default function WebsiteDetail() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="surface card-accent">
           <CardHeader>
-            <CardTitle className="text-base">Problems we told you about</CardTitle>
+            <CardTitle className="font-serif text-base">Problems we told you about</CardTitle>
           </CardHeader>
           <CardContent>
             {incidents.isLoading ? (

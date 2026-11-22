@@ -43,12 +43,12 @@ function Incident({ incident, canEdit }) {
       onSuccess: () => notify.success(message),
     });
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <Card className="surface card-accent transition-shadow duration-150 hover:shadow-md">
+      <CardContent className="flex flex-col gap-3 p-5">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={state.status} label={state.label} />
-            <h2 className="font-medium">{incident.name}</h2>
+            <h2 className="font-serif text-base font-semibold leading-tight">{incident.name}</h2>
           </div>
           <p className="text-sm text-muted-foreground">
             {incident.resource?.name &&
@@ -147,7 +147,7 @@ export default function HistoryTab() {
         />
       ) : (
         <>
-          <ul className="space-y-3">
+          <ul className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
             {items.map((incident) => (
               <li key={incident.id}>
                 <Incident incident={incident} canEdit={isAdmin} />

@@ -177,10 +177,10 @@ export default function Plan() {
         </Alert>
       )}
 
-      <Card>
+      <Card className="surface card-accent">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-lg">Your plan: {current.name}</CardTitle>
+            <CardTitle className="font-serif text-base">Your plan: {current.name}</CardTitle>
             {subscription?.status && (
               <Badge variant="secondary" className="capitalize">
                 {subscription.status.replace('_', ' ')}
@@ -239,7 +239,7 @@ export default function Plan() {
         <>
           <section aria-labelledby="plans-heading" className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 id="plans-heading" className="text-lg font-semibold">
+              <h2 id="plans-heading" className="font-serif text-base font-semibold">
                 Compare plans
               </h2>
               <div className="flex flex-wrap gap-2">
@@ -281,9 +281,9 @@ export default function Plan() {
                 const isCurrent = p.id === current.id;
                 const price = priceOf(p) * (interval === 'annual' ? 10 : 1);
                 return (
-                  <Card key={p.id} className={isCurrent ? 'border-primary' : undefined}>
+                  <Card key={p.id} className={isCurrent ? "surface card-accent border-primary" : "surface card-accent"}>
                     <CardHeader>
-                      <CardTitle className="text-lg">{p.name}</CardTitle>
+                      <CardTitle className="font-serif text-base">{p.name}</CardTitle>
                       <CardDescription>
                         <span className="text-2xl font-semibold text-foreground">
                           {price === 0 ? 'Free' : money(price, currency)}
@@ -331,7 +331,7 @@ export default function Plan() {
           {owner && <BillingProfile profile={data.profile} />}
 
           <section aria-labelledby="invoices-heading" className="space-y-3">
-            <h2 id="invoices-heading" className="text-lg font-semibold">
+            <h2 id="invoices-heading" className="font-serif text-base font-semibold">
               Invoices
             </h2>
             <DataTable

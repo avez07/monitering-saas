@@ -26,9 +26,9 @@ const endpointColumns = [
 
 function EndpointTable({ title, rows }) {
   return (
-    <Card>
+    <Card className="surface card-accent">
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="font-serif text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <DataTable
@@ -75,7 +75,7 @@ export default function ServiceDetail() {
   const empty = !series.length && none;
 
   return (
-    <>
+    <div className="page">
       <PageHeader
         title={name}
         breadcrumbs={crumbs}
@@ -95,7 +95,7 @@ export default function ServiceDetail() {
         }
       />
       <div className="mb-4 flex flex-wrap items-end gap-4">
-        <div className="w-full max-w-xs">
+        <div className="w-full sm:w-64">
           <RangeSelect value={range} onChange={(v) => setParams({ range: v })} />
         </div>
         {s && <AppStatus status={s.status} />}
@@ -162,9 +162,9 @@ export default function ServiceDetail() {
             />
           </div>
 
-          <Card>
+          <Card className="surface card-accent">
             <CardHeader>
-              <CardTitle className="text-base">Recent errors, grouped by type</CardTitle>
+              <CardTitle className="font-serif text-base">Recent errors, grouped by type</CardTitle>
             </CardHeader>
             <CardContent>
               <DataTable
@@ -192,6 +192,6 @@ export default function ServiceDetail() {
           </Card>
         </div>
       )}
-    </>
+    </div>
   );
 }

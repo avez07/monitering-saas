@@ -78,7 +78,7 @@ export default function ServiceDetail() {
   const s = data;
   const state = STATE[s.state] || STATE.unknown;
   return (
-    <>
+    <div className="page">
       <PageHeader
         title={s.name}
         breadcrumbs={[{ label: 'Services', to: '/services' }, { label: s.name }]}
@@ -95,16 +95,16 @@ export default function ServiceDetail() {
           )
         }
       />
-      <div className="space-y-6">
-        <Card>
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-1 duration-200">
+        <Card className="shadow-none">
+          <CardContent className="grid gap-5 p-5 sm:grid-cols-2 2xl:grid-cols-4">
             <div>
-              <p className="text-sm text-muted-foreground">State</p>
+              <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">State</p>
               <StatusBadge status={state.status} label={state.label} />
               {s.detail && <p className="mt-1 text-sm text-muted-foreground">{s.detail}</p>}
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Runs on</p>
+              <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Runs on</p>
               {s.serverId ? (
                 <Link to={`/servers/${s.serverId}`} className="underline-offset-4 hover:underline">
                   {s.serverName || 'Host'}
@@ -114,11 +114,11 @@ export default function ServiceDetail() {
               )}
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Type</p>
+              <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Type</p>
               <p>{s.kind || s.type}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Last checked</p>
+              <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Last checked</p>
               <RelativeTime value={s.lastChecked} />
               {s.responseMs != null && (
                 <span className="text-sm text-muted-foreground"> · {s.responseMs} ms</span>
@@ -142,9 +142,9 @@ export default function ServiceDetail() {
             </AlertDescription>
           </Alert>
         )}
-        <Card>
+        <Card className="shadow-none">
           <CardHeader>
-            <CardTitle className="text-base">History</CardTitle>
+            <CardTitle className="font-serif text-base font-semibold">History</CardTitle>
           </CardHeader>
           <CardContent>
             {s.events?.length ? (
@@ -194,6 +194,6 @@ export default function ServiceDetail() {
           )
         }
       />
-    </>
+    </div>
   );
 }

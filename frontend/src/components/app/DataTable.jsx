@@ -23,7 +23,7 @@ export function DataTable({
 }) {
   if (!rows?.length && empty) return empty;
   return (
-    <div className={cn('overflow-x-auto rounded-lg border', className)}>
+    <div className={cn('overflow-x-auto rounded-2xl border bg-card', className)}>
       <Table>
         <TableHeader>
           <TableRow>
