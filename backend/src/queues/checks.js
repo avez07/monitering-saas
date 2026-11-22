@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getQueue, startWorker } from './factory.js';
 import { checkMonitorNow, hostOf, Gate, RETRY_DELAY_SECONDS } from '../services/checks.js';
+import { isOrgSuspended } from '../services/platform-suspension.js';
 
 export const CHECKS_QUEUE = 'checks';
 export const CHECK_CONCURRENCY = 50;
@@ -117,6 +118,8 @@ export async function processCheck(store, job, deps = {}) {
     await removeMonitor(monitorId); // a deleted or paused monitor stops being scheduled
     return { skipped: true };
   }
+  // A suspended organization keeps its schedule (reactivating resumes it) but nothing is checked.
+  if (await isOrgSuspended(store, monitor.orgId)) return { skipped: true, suspended: true };
   const { result, status } = await withHost(hostOf(monitor.target), () =>
     checkMonitorNow(store, monitor, deps),
   );

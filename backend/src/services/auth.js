@@ -1,18 +1,22 @@
 import { config } from '../config.js';
 import { assert } from '../lib/errors.js';
 import { token as newToken, digest } from '../lib/crypto.js';
+import { assertOrgUnlocked } from './platform-suspension.js';
 
 export const SESSION_COOKIE = 'yuktiops_session';
 const IDLE_MS = 7 * 86400000; // sign out after 7 idle days
 const ABSOLUTE_MS = 30 * 86400000; // and never keep a session longer than 30 days
 const TOUCH_EVERY_MS = 60000;
 
-export const publicUser = ({ id, name, email, emailVerifiedAt }) => ({
+export const publicUser = ({ id, name, email, emailVerifiedAt, isPlatformAdmin }) => ({
   id,
   name,
   email,
   emailVerified: Boolean(emailVerifiedAt),
+  isPlatformAdmin: Boolean(isPlatformAdmin),
 });
+
+export const DISABLED_MESSAGE = 'This account has been disabled. Contact support if you think this is a mistake.';
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -30,6 +34,7 @@ function readCookie(req, name) {
 
 /** Create a server-side session and set its httpOnly cookie. Only a hash of the token is stored. */
 export async function startSession(store, req, res, user) {
+  assert(!user.disabledAt, 403, DISABLED_MESSAGE);
   const raw = newToken('ses');
   await store.create('session', {
     userId: user.id,
@@ -72,6 +77,8 @@ export async function resolveSession(store, req) {
     await store.update('session', session.id, { lastUsedAt: new Date() });
   const user = await store.find('user', { id: session.userId });
   assert(user, 401, 'Account not found.');
+  // Disabling revokes every session too; this covers a session created in the same instant.
+  assert(!user.disabledAt, 401, DISABLED_MESSAGE);
   return user;
 }
 
@@ -82,7 +89,14 @@ export function auth(store) {
       const memberships = await store.list('organizationMember', { userId: user.id });
       const orgId = req.headers['x-organization-id'] || memberships[0]?.orgId;
       const membership = memberships.find((m) => m.orgId === orgId);
+      // /bootstrap always answers, so the UI can explain a suspension or send staff to /admin.
+      const bootstrap = req.method === 'GET' && req.path === '/bootstrap';
+      if (!membership && bootstrap && user.isPlatformAdmin && !memberships.length) {
+        req.context = { user: publicUser(user), orgId: null, membership: null };
+        return next();
+      }
       assert(membership, 403, 'You do not have access to this organization.');
+      if (!bootstrap) await assertOrgUnlocked(store, orgId);
       req.context = { user: publicUser(user), orgId, membership };
       next();
     } catch (error) {
@@ -156,6 +170,20 @@ export async function requireRow(store, context, table, id) {
   assert(row, 404, 'Record not found.');
   return row;
 }
+/** Yukti staff only (/api/platform): a valid session whose user has isPlatformAdmin. No organization needed. */
+export function platformAuth(store) {
+  return async (req, res, next) => {
+    try {
+      const user = await resolveSession(store, req);
+      assert(user.isPlatformAdmin, 403, 'This area is for Yukti staff only.');
+      req.context = { user: publicUser(user), admin: user };
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
 export function credentialAuth(store) {
   return async (req, res, next) => {
     try {

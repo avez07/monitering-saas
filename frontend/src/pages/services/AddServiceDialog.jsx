@@ -25,34 +25,38 @@ import { useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
 import LocalTestGuide from './LocalTestGuide';
 import InstallAgentDialog from './InstallAgentDialog';
+import CredentialsSection from './CredentialsSection';
+import { CREDENTIAL_KINDS, credentialsRefError } from './credentials-guide';
 
-// Contract: docs/api/phase16.md (POST /api/services).
+// Contract: docs/api/phase16.md (POST /api/services). Services run on a host with the agent;
+// websites, APIs and public ports are added under Websites & APIs.
 export const SERVICE_TYPES = [
-  { id: 'website', label: 'Website', text: 'A web page. We check it from outside.', external: true },
-  { id: 'api', label: 'API', text: 'An API address. We check it from outside.', external: true },
-  { id: 'tcp', label: 'TCP port', text: 'Is a port open? Public address or on one of your hosts.' },
+  { id: 'tcp', label: 'TCP port', text: 'Is a port open on one of your hosts?' },
   { id: 'nginx', label: 'nginx', text: 'The nginx status page on a host.' },
   { id: 'apache', label: 'Apache', text: 'The Apache status page on a host.' },
   { id: 'mysql', label: 'MySQL', text: 'Does MySQL answer on a host?' },
   { id: 'postgres', label: 'PostgreSQL', text: 'Does PostgreSQL answer on a host?' },
+  { id: 'mssql', label: 'Microsoft SQL Server', text: 'Does SQL Server answer on a host?' },
   { id: 'redis', label: 'Redis', text: 'Does Redis answer on a host?' },
   { id: 'systemd', label: 'System service', text: 'A systemd unit such as nginx or cron.' },
   { id: 'process', label: 'Program', text: 'A program by its process name.' },
 ];
-const PUBLIC = '__public__';
 const INSTALL = '__install__';
-const DEFAULT_PORT = { mysql: 3306, postgres: 5432, redis: 6379 };
+const DEFAULT_PORT = { mysql: 3306, postgres: 5432, mssql: 1433, redis: 6379 };
+const EMPTY = { name: '', host: '', url: '', port: '', unit: '', processName: '', credentialsRef: '' };
 
 function Waiting({ created, onClose }) {
   const [tries, setTries] = useState(0);
   const list = useApi('/services', {}, { refetchInterval: 4000 });
   const items = Array.isArray(list.data) ? list.data : (list.data?.items ?? []);
-  const seen = items.find((s) => s.id === created.id || (s.name === created.name && (s.serverId ?? null) === (created.serverId ?? null)));
+  // A reported service has its own id; match the pending entry by host, kind and name.
+  const seen = items.find(
+    (s) => s.id === created.id || (s.serverId === created.serverId && s.kind === created.kind && s.name === created.name),
+  );
   useEffect(() => {
     const id = setInterval(() => setTries((t) => t + 1), 4000);
     return () => clearInterval(id);
   }, []);
-  const monitor = created.source === 'monitor';
   return (
     <div className="space-y-4" role="status">
       {seen ? (
@@ -70,21 +74,10 @@ function Waiting({ created, onClose }) {
           <Loader2 className="size-4 animate-spin" aria-hidden="true" />
           <AlertTitle>Waiting for first result…</AlertTitle>
           <AlertDescription>
-            {monitor
-              ? 'The first check runs in a few seconds.'
-              : 'The agent picks up the new service on its next settings check, usually within a minute.'}
+            The agent picks up the new service on its next settings check, usually within a minute.
             {tries > 20 && ' This is taking longer than usual. You can close this window, it keeps trying.'}
           </AlertDescription>
         </Alert>
-      )}
-      {monitor && created.monitorId && (
-        <p className="text-sm text-muted-foreground">
-          This one is checked from outside, so you can also see it under{' '}
-          <Link to={`/websites/${created.monitorId}`} className="underline underline-offset-4">
-            Websites and APIs
-          </Link>
-          .
-        </p>
       )}
       <Button onClick={onClose}>{seen ? 'Done' : 'Close'}</Button>
     </div>
@@ -97,7 +90,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
   const hosts = useApi('/servers', { includeDockerHosts: 'true' }, { enabled: open });
   const hostList = Array.isArray(hosts.data) ? hosts.data : (hosts.data?.items ?? []);
   const [type, setType] = useState(null);
-  const [form, setForm] = useState({ name: '', host: '', url: '', port: '', address: '', unit: '', processName: '' });
+  const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
   const [created, setCreated] = useState(null);
   const [installing, setInstalling] = useState(false);
@@ -115,7 +108,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
 
   function reset() {
     setType(null);
-    setForm({ name: '', host: '', url: '', port: '', address: '', unit: '', processName: '' });
+    setForm(EMPTY);
     setError('');
     setCreated(null);
   }
@@ -124,9 +117,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
     onOpenChange(next);
   }
 
-  const onHost = type && !def.external && !(type === 'tcp' && form.host === PUBLIC);
-  const needsUrl = type === 'website' || type === 'api' || type === 'nginx' || type === 'apache';
-  const urlRequired = type === 'website' || type === 'api';
+  const needsUrl = type === 'nginx' || type === 'apache';
 
   function submit(event) {
     event.preventDefault();
@@ -134,16 +125,9 @@ export default function AddServiceDialog({ open, onOpenChange }) {
     const name = form.name.trim();
     if (!name) return setError('Give the service a name.');
     const body = { type, name };
-    if (onHost) {
-      if (!form.host || form.host === INSTALL) return setError('Choose the host it runs on.');
-      body.host = form.host;
-    }
+    if (!form.host || form.host === INSTALL) return setError('Choose the host it runs on.');
+    body.host = form.host;
     if (needsUrl && form.url.trim()) body.url = form.url.trim();
-    if (urlRequired && !form.url.trim()) return setError('Enter the address, starting with http.');
-    if (type === 'tcp' && form.host === PUBLIC) {
-      if (!form.address.trim()) return setError('Enter the address to check.');
-      body.address = form.address.trim();
-    }
     if (form.port) {
       const port = Number(form.port);
       if (!(port >= 1 && port <= 65535)) return setError('Enter a port between 1 and 65535.');
@@ -151,6 +135,11 @@ export default function AddServiceDialog({ open, onOpenChange }) {
     } else if (type === 'tcp') return setError('Enter a port.');
     if (type === 'systemd' && form.unit.trim()) body.unit = form.unit.trim();
     if (type === 'process' && form.processName.trim()) body.processName = form.processName.trim();
+    if (CREDENTIAL_KINDS.includes(type) && form.credentialsRef.trim()) {
+      const refError = credentialsRefError(form.credentialsRef);
+      if (refError) return setError(refError);
+      body.credentialsRef = form.credentialsRef.trim();
+    }
     create.mutate(body);
   }
 
@@ -165,7 +154,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                 ? 'Added.'
                 : type
                   ? def.text
-                  : 'What do you want to watch? You can stay on this page, nothing is installed unless you pick a service that runs on a host.'}
+                  : 'What runs on your host that you want to watch? The agent on that host checks it.'}
             </DialogDescription>
           </DialogHeader>
           {!isAdmin ? (
@@ -177,6 +166,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
           ) : created ? (
             <Waiting created={created} onClose={() => close(false)} />
           ) : !type ? (
+            <div className="space-y-4">
             <ul className="grid gap-2 sm:grid-cols-2">
               {SERVICE_TYPES.map((t) => (
                 <li key={t.id}>
@@ -186,7 +176,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                     className="h-auto w-full flex-col items-start gap-1 whitespace-normal py-3 text-left"
                     onClick={() => {
                       setType(t.id);
-                      set({ host: t.id === 'tcp' ? PUBLIC : '' });
+                      set({ host: '' });
                     }}
                   >
                     <span className="font-medium">{t.label}</span>
@@ -195,12 +185,16 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                 </li>
               ))}
             </ul>
+            <p className="text-sm text-muted-foreground" data-testid="websites-hint">
+              Checking a website, API or public port? →{' '}
+              <Link to="/websites" onClick={() => close(false)} className="font-medium text-foreground underline underline-offset-4">
+                Websites &amp; APIs
+              </Link>
+            </p>
+            </div>
           ) : (
             <form onSubmit={submit} className="space-y-4" noValidate>
-              {(!def.external) && (
-                <FormField
-                  label={type === 'tcp' ? 'Where is the port?' : 'Which host does it run on?'}
-                >
+              <FormField label={type === 'tcp' ? 'Which host has the port?' : 'Which host does it run on?'}>
                   {(p) => (
                     <Select
                       value={form.host}
@@ -213,9 +207,6 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                         <SelectValue placeholder="Choose a host" />
                       </SelectTrigger>
                       <SelectContent>
-                        {type === 'tcp' && (
-                          <SelectItem value={PUBLIC}>A public address (checked from outside)</SelectItem>
-                        )}
                         {hostList.map((h) => (
                           <SelectItem key={h.id} value={h.id}>
                             {h.name}
@@ -226,8 +217,7 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                       </SelectContent>
                     </Select>
                   )}
-                </FormField>
-              )}
+              </FormField>
               <FormField label="Name" hint="Shown in your list, for example Main database.">
                 {(p) => (
                   <Input {...p} value={form.name} maxLength={100} onChange={(e) => set({ name: e.target.value })} />
@@ -235,21 +225,14 @@ export default function AddServiceDialog({ open, onOpenChange }) {
               </FormField>
               {needsUrl && (
                 <FormField
-                  label={type === 'nginx' || type === 'apache' ? 'Status page address (optional)' : 'Address'}
+                  label="Status page address (optional)"
                   hint={
                     type === 'nginx'
                       ? 'Default: http://127.0.0.1/nginx_status'
-                      : type === 'apache'
-                        ? 'Default: http://127.0.0.1/server-status?auto'
-                        : 'Starts with http:// or https://'
+                      : 'Default: http://127.0.0.1/server-status?auto'
                   }
                 >
                   {(p) => <Input {...p} type="url" value={form.url} onChange={(e) => set({ url: e.target.value })} />}
-                </FormField>
-              )}
-              {type === 'tcp' && form.host === PUBLIC && (
-                <FormField label="Host name or IP address">
-                  {(p) => <Input {...p} value={form.address} onChange={(e) => set({ address: e.target.value })} />}
                 </FormField>
               )}
               {(type === 'tcp' || DEFAULT_PORT[type]) && (
@@ -269,6 +252,11 @@ export default function AddServiceDialog({ open, onOpenChange }) {
                   {(p) => <Input {...p} value={form.processName} onChange={(e) => set({ processName: e.target.value })} />}
                 </FormField>
               )}
+              <CredentialsSection
+                kind={type}
+                value={form.credentialsRef}
+                onChange={(credentialsRef) => set({ credentialsRef })}
+              />
               <LocalTestGuide type={type} />
               {error && (
                 <p role="alert" className="text-sm font-medium text-destructive">

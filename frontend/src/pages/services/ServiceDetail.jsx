@@ -101,7 +101,12 @@ export default function ServiceDetail() {
             <div>
               <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">State</p>
               <StatusBadge status={state.status} label={state.label} />
-              {s.detail && <p className="mt-1 text-sm text-muted-foreground">{s.detail}</p>}
+              {/* The agent's own words, e.g. "authenticated" or "auth failed: wrong user or password". */}
+              {s.detail && (
+                <p className="mt-1 text-sm text-muted-foreground" data-testid="service-detail">
+                  {s.detail}
+                </p>
+              )}
             </div>
             <div>
               <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Runs on</p>
@@ -116,6 +121,11 @@ export default function ServiceDetail() {
             <div>
               <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Type</p>
               <p>{s.kind || s.type}</p>
+              {s.credentialsRef && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Credentials: <code className="font-mono">{s.credentialsRef}</code>
+                </p>
+              )}
             </div>
             <div>
               <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Last checked</p>
@@ -161,8 +171,7 @@ export default function ServiceDetail() {
             )}
           </CardContent>
         </Card>
-        <LocalTestGuide type={s.type || s.kind} />
-        {data && !data.type && <LocalTestGuide type={s.kind} />}
+        <LocalTestGuide type={s.kind || s.type} />
       </div>
       {editing && (
         <EditServiceDialog

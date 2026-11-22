@@ -1,7 +1,8 @@
 // Package docker lists containers through the local Docker socket.
 //
 // It is opt-in and strictly read-only: only GET requests are ever made (enforced by the transport,
-// see readOnly), and only three endpoints are used: container list, inspect and one-shot stats.
+// see readOnly), and only these endpoints are used: container list, inspect, one-shot stats, and
+// (when container logs are switched on, see logs.go) container logs and events.
 // The standard library is enough; no Docker SDK is linked in.
 package docker
 
@@ -137,16 +138,20 @@ func classify(err error) error {
 }
 
 type listEntry struct {
-	ID     string   `json:"Id"`
-	Names  []string `json:"Names"`
-	Image  string   `json:"Image"`
-	State  string   `json:"State"`
-	Status string   `json:"Status"`
+	ID     string            `json:"Id"`
+	Names  []string          `json:"Names"`
+	Image  string            `json:"Image"`
+	State  string            `json:"State"`
+	Status string            `json:"Status"`
+	Labels map[string]string `json:"Labels"`
 }
 
 type inspectDoc struct {
 	RestartCount int `json:"RestartCount"`
-	State        struct {
+	Config       struct {
+		Tty bool `json:"Tty"`
+	} `json:"Config"`
+	State struct {
 		StartedAt string `json:"StartedAt"`
 		OOMKilled bool   `json:"OOMKilled"`
 	} `json:"State"`

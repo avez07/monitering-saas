@@ -55,6 +55,21 @@ export function SessionProvider({ children }) {
     [client],
   );
 
+  // A 423 means a platform admin suspended this organization while it was open: reload bootstrap so
+  // the suspended notice replaces the app.
+  useEffect(
+    () =>
+      client.getQueryCache().subscribe((event) => {
+        if (
+          event.type === 'updated' &&
+          event.action?.type === 'error' &&
+          event.action.error?.status === 423
+        )
+          client.invalidateQueries({ queryKey: ['session', 'bootstrap'] });
+      }),
+    [client],
+  );
+
   useEffect(() => {
     window.addEventListener('yuktiops:logout', signOut);
     return () => window.removeEventListener('yuktiops:logout', signOut);
@@ -73,6 +88,12 @@ export function SessionProvider({ children }) {
       plan: data?.plan ?? null,
       subscription: data?.subscription ?? null,
       apiPublicUrl: data?.apiPublicUrl ?? '',
+      // Yukti staff (platform admin): may open /admin. Staff may have no organization (organization null).
+      isPlatformAdmin: Boolean(data?.user?.isPlatformAdmin),
+      // Set when a platform admin suspended the current organization (the app shows a full-page notice).
+      suspended: data?.organization?.suspendedAt
+        ? { at: data.organization.suspendedAt, reason: data.organization.suspendReason || '' }
+        : null,
       canEdit: ['owner', 'admin', 'editor'].includes(data?.role),
       isAdmin: ['owner', 'admin'].includes(data?.role),
       signOut,

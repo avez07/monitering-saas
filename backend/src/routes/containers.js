@@ -1,10 +1,25 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { CONTAINER_RANGES, CONTAINER_STATES, containerDetail, containerMetrics, listContainers, requireContainer } from '../services/containers.js';
+import { canEdit } from '../services/auth.js';
+import {
+  CONTAINER_RANGES,
+  CONTAINER_STATES,
+  LOG_LEVEL_NAMES,
+  containerDetail,
+  containerLogs,
+  containerMetrics,
+  listContainers,
+  requireContainer,
+  setContainerLogs,
+} from '../services/containers.js';
 
 const id = z.string().max(80);
+const isoTime = z.string().max(40).optional();
 
-/** The Containers section. Read-only: containers are reported by the agent, never created or changed here. */
+/**
+ * The Containers section. Containers are reported by the agent, never created here; the only setting is
+ * whether the agent collects a container's logs.
+ */
 export function containerRoutes(store) {
   const router = Router();
   router.get('/containers', async (req, res) => {
@@ -25,6 +40,26 @@ export function containerRoutes(store) {
     const { range } = z.object({ range: z.enum(Object.keys(CONTAINER_RANGES)).default('1h') }).parse(req.query);
     const { row } = await requireContainer(store, req.context.orgId, req.params.id);
     res.json(await containerMetrics(store, row, range));
+  });
+  // Container logs (docs/api/advanced-telemetry.md section 5): { items: [{time, stream, level, message}], nextSince }.
+  router.get('/containers/:id/logs', async (req, res) => {
+    const q = z
+      .object({
+        since: isoTime,
+        until: isoTime,
+        q: z.string().max(200).optional(),
+        level: z.enum(LOG_LEVEL_NAMES).optional(),
+        stream: z.enum(['stdout', 'stderr']).optional(),
+        limit: z.coerce.number().int().min(1).max(1000).default(200),
+      })
+      .parse(req.query);
+    const { row } = await requireContainer(store, req.context.orgId, req.params.id);
+    res.json(await containerLogs(store, row, q));
+  });
+  router.patch('/containers/:id/logs', canEdit, async (req, res) => {
+    const { enabled } = z.object({ enabled: z.boolean() }).strict().parse(req.body);
+    const { row } = await requireContainer(store, req.context.orgId, req.params.id);
+    res.json(await setContainerLogs(store, row, enabled));
   });
   return router;
 }

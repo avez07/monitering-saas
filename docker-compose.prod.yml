@@ -32,6 +32,8 @@ x-app-env: &app-env
   CLICKHOUSE_USER: ${CLICKHOUSE_USER:-yuktiops}
   CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
   CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-yuktiops_otel}
+  VM_URL: http://victoriametrics:8428
+  PROM_MAX_SERIES_PER_ORG: ${PROM_MAX_SERIES_PER_ORG:-50000}
 
 x-app-hardening: &app-hardening
   image: ${APP_IMAGE:-yuktiops-app}:${APP_TAG:-latest}
@@ -262,6 +264,30 @@ services:
       retries: 10
     logging: *logging
 
+  # Prometheus remote_write storage (premium dashboard). Internal network only, no published port; reads are
+  # always scoped by the API with extra_label=yk_org=<orgId>. Data ages out after 30 days.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    init: true
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/storage
+      - -retentionPeriod=30d
+      - -httpListenAddr=:8428
+      - -search.maxPointsPerTimeseries=11000
+      - -search.maxQueryDuration=10s
+    volumes:
+      - vm-data:/storage
+    networks: [internal]
+    deploy:
+      resources: { limits: { cpus: '1.5', memory: 1536M } }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8428/health | grep -q OK']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
   db:
     image: ${DB_IMAGE:-yuktiops-db}:${DB_TAG:-pg16-ts2.17}
     build: { context: ./deploy/postgres }
@@ -335,6 +361,7 @@ volumes:
   db-data:
   redis-data:
   clickhouse-data:
+  vm-data:
   pgbackrest-spool:
   pgbackrest-log:
   caddy-data:

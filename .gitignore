@@ -11,3 +11,6 @@ playwright-report/
 backend/.env.agent
 !.env.production.example
 backend/downloads/
+
+# Locally built agent binary
+agent/yuktiops-agent

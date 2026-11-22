@@ -76,6 +76,52 @@ export function planLimit(plan, key) {
   if (key === 'servers' && plan.extraServerUsdCents > 0) return Infinity;
   return plan[limitKeys[key]];
 }
+/** True when the plan switches on a premium feature (`advancedDashboard`, `promMetrics`). */
+export function hasFeature(plan, name) {
+  const features = plan?.features;
+  return Boolean(features && typeof features === 'object' && !Array.isArray(features) && features[name] === true);
+}
+/**
+ * Whether the organization's current subscription includes a feature. An expired or missing subscription
+ * includes nothing (no error is thrown).
+ */
+export async function orgHasFeature(store, orgId, name) {
+  try {
+    const { plan } = await entitlements(store, orgId);
+    return hasFeature(plan, name);
+  } catch (error) {
+    if (error.status === 402 || error.status === 403) return false;
+    throw error;
+  }
+}
+const featureKey = (orgId) => `feat:${orgId}`;
+/**
+ * `{ planId, planName, features }` of the organization's current subscription, cached in Redis for a short
+ * time (hot agent paths: remote_write, logs). `planId` is null when there is no valid subscription.
+ * Plan changes drop the entry (`forgetOrgFeatures`), so they apply at once.
+ */
+export async function orgPlanCached(store, orgId, seconds = 30) {
+  const redis = getRedis();
+  const hit = await redis.get(featureKey(orgId));
+  if (hit) return JSON.parse(hit);
+  let value;
+  try {
+    const { plan } = await entitlements(store, orgId);
+    value = { planId: plan.id, planName: plan.name, features: plan.features ?? {} };
+  } catch (error) {
+    if (error.status !== 402 && error.status !== 403) throw error;
+    value = { planId: null, planName: null, features: {} };
+  }
+  await redis.set(featureKey(orgId), JSON.stringify(value), 'EX', seconds);
+  return value;
+}
+export const forgetOrgFeatures = (orgId) => getRedis().del(featureKey(orgId));
+/** Rejects with 402 unless the organization's plan includes the feature. */
+export async function requireFeature(store, orgId, name, message) {
+  const { plan } = await entitlements(store, orgId);
+  assert(hasFeature(plan, name), 402, message || `Your ${plan.name} plan does not include this. Upgrade to Pro.`);
+  return plan;
+}
 export async function entitlements(store, orgId) {
   const subscription = await store.find('subscription', { orgId });
   assert(subscription, 403, 'An active subscription is required.');

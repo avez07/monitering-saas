@@ -10,7 +10,7 @@ import {
   forgetTelemetryKey,
   readSeen,
 } from '../services/otel-auth.js';
-import { agentSettingsSchema, newConfigId, ensureDefaultConfig } from '../services/agent-config.js';
+import { agentSettingsSchema, newConfigId, ensureDefaultConfig, enforcePlanSettings } from '../services/agent-config.js';
 
 const MAX_CONFIGS = 20;
 const name = z.string().trim().min(1).max(80);
@@ -117,6 +117,7 @@ export function apiKeyRoutes(store) {
       409,
       `You can keep up to ${MAX_CONFIGS} setup profiles.`,
     );
+    input.settings = await enforcePlanSettings(store, orgId, input.settings); // the plan decides collectors.prometheus
     const row = await store.create('agentConfig', { id: newConfigId(), orgId, ...input });
     await audit(store, req.context, 'agent_config.created', row.id);
     res.status(201).json(row);
@@ -127,6 +128,7 @@ export function apiKeyRoutes(store) {
       .parse(req.body);
     const row = await store.find('agentConfig', { id: req.params.id, orgId: req.context.orgId });
     assert(row, 404, 'Setup profile not found.');
+    input.settings = await enforcePlanSettings(store, row.orgId, input.settings); // the plan decides collectors.prometheus
     // Agents compare versions, so every change bumps it.
     const updated = await store.update('agentConfig', row.id, {
       ...input,

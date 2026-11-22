@@ -67,6 +67,9 @@ func (p Paths) StateFile() string        { return filepath.Join(p.StateDir, "sta
 func (p Paths) BufferFile() string       { return filepath.Join(p.StateDir, "buffer.jsonl") }
 func (p Paths) RemoteConfigFile() string { return filepath.Join(p.StateDir, "remote-config.json") }
 
+// LogCheckpointFile remembers the last container log line delivered per container.
+func (p Paths) LogCheckpointFile() string { return filepath.Join(p.StateDir, "log-checkpoints.json") }
+
 // ConfigFiles and StateFiles list every file the agent itself creates, so uninstall can remove
 // exactly those and nothing else.
 func (p Paths) ConfigFiles() []string {
@@ -74,7 +77,7 @@ func (p Paths) ConfigFiles() []string {
 }
 
 func (p Paths) StateFiles() []string {
-	return []string{p.StateFile(), p.BufferFile(), p.RemoteConfigFile()}
+	return []string{p.StateFile(), p.BufferFile(), p.RemoteConfigFile(), p.LogCheckpointFile()}
 }
 
 // HostRoot returns the cleaned HOST_ROOT value, or "" when it is unset or means "/".

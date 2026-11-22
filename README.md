@@ -31,7 +31,14 @@ Agent image not public yet (`docker run` says `denied`)? Build it: `docker build
 
 ## Status
 
-All build phases are in place: accounts and teams (owner, admin, viewer), the account API key and per-server credentials, the Go agent with a one-command installer, the dashboard (Overview, Servers with 1h/24h/7d/30d charts and a Connection page, Add-server wizard, Containers, Services, Websites and APIs, Alerts with templates and contacts, Settings), email verification and invites, billing (mock provider locally), and the marketing site. See [PLAN.md](PLAN.md) for the roadmap and [START.md](START.md) to run and test everything.
+All build phases are in place: accounts and teams (owner, admin, viewer), the account API key and per-server credentials, the Go agent with a one-command installer, the dashboard (Overview, Servers with 1h/24h/7d/30d charts and a Connection page, Add-server wizard, Containers, Services, Websites and APIs, Alerts with templates and contacts, Settings), email verification and invites, billing (mock provider locally), and the marketing site.
+
+Advanced telemetry ([docs/api/advanced-telemetry.md](docs/api/advanced-telemetry.md)):
+
+- Premium plans: Prometheus remote_write of node_exporter and cAdvisor-named metrics (Linux agent) into VictoriaMetrics, switched on or off live when the plan changes.
+- Docker container log tailing (OTLP to `/v1/otlp/logs`, all plans, counts against the telemetry quota).
+- MSSQL service probe, and database metrics with credentials that stay on the server (`YUKTIOPS_CRED_<REF>_*` or `credentials.d/<ref>.env`).
+- A platform admin area at `/admin` for YuktiOps staff (`npm run admin:create -- <email>`). See [PLAN.md](PLAN.md) for the roadmap and [START.md](START.md) to run and test everything.
 
 ## Security basics
 

@@ -93,22 +93,54 @@ test('a config without hostKind keeps a docker host a docker host', async () => 
   assert.equal(res.body.kind, 'docker-host');
 });
 
-test('POST /api/services creates a monitor for external types', async () => {
+test('POST /api/services only adds host services: websites, APIs and host-less ports are refused', async () => {
   const owner = await register(app, 'Mon');
-  const res = await owner.client.post('/api/services').send({ type: 'website', name: 'Home', url: site.url('/') });
-  assert.equal(res.status, 201, res.text);
-  assert.equal(res.body.status, 'pending');
-  assert.equal(res.body.source, 'monitor');
-  const sites = (await owner.client.get('/api/websites')).body.items;
-  assert.equal(sites.length, 1);
-  assert.equal(sites[0].id, res.body.id);
-  const api = await owner.client.post('/api/services').send({ type: 'api', name: 'API', url: site.url('/h') });
-  assert.equal((await owner.client.get('/api/websites')).body.items.find((s) => s.id === api.body.id).type, 'api');
+  assert.equal((await owner.client.post('/api/services').send({ type: 'website', name: 'Home', url: site.url('/') })).status, 400);
+  assert.equal((await owner.client.post('/api/services').send({ type: 'api', name: 'API', url: site.url('/h') })).status, 400);
   const tcp = await owner.client.post('/api/services').send({ type: 'tcp', name: 'Port', address: '127.0.0.1', port: site.port });
-  assert.equal(tcp.status, 201, tcp.text);
-  assert.equal((await owner.client.get('/api/websites')).body.items.find((s) => s.id === tcp.body.id).type, 'tcp');
-  assert.equal((await owner.client.delete(`/api/services/${res.body.id}`)).status, 204);
-  assert.equal((await owner.client.get('/api/websites')).body.items.length, 2);
+  assert.equal(tcp.status, 400, tcp.text);
+  assert.match(tcp.body.error, /Choose the host\. For a public address use Websites & APIs\./);
+  assert.equal((await owner.client.get('/api/websites')).body.items.length, 0, 'no monitor is created');
+});
+
+test('POST /api/services adds SQL Server on port 1433 and stores a credentials reference, never a secret', async () => {
+  const owner = await register(app, 'Mssql');
+  const { agentId } = await enrollServer(app, owner, 1);
+  const res = await owner.client.post('/api/services').send({ type: 'mssql', name: 'sql', host: agentId, credentialsRef: 'sql-main' });
+  assert.equal(res.status, 201, res.text);
+  assert.equal(res.body.kind, 'mssql');
+  const pg = await owner.client.post('/api/services').send({ type: 'postgres', name: 'pg', host: agentId });
+  assert.equal(pg.status, 201, pg.text);
+  const services = async () => (await owner.client.get(`/api/servers/${agentId}`)).body.config.settings.collectors.services;
+  assert.deepEqual(await services(), [
+    { kind: 'mssql', name: 'sql', port: 1433, credentialsRef: 'sql-main' },
+    { kind: 'postgres', name: 'pg', port: 5432 },
+  ]);
+  const post = (body) => owner.client.post('/api/services').send({ host: agentId, ...body });
+  assert.equal((await post({ type: 'redis', name: 'r', credentialsRef: 'Bad_Ref' })).status, 400);
+  assert.equal((await post({ type: 'redis', name: 'r', credentialsRef: '-lead' })).status, 400);
+  assert.equal((await post({ type: 'redis', name: 'r', credentialsRef: 'a'.repeat(41) })).status, 400);
+  assert.equal((await post({ type: 'systemd', name: 'ssh', unit: 'ssh.service', credentialsRef: 'x' })).status, 400, 'only databases take credentials');
+  assert.equal((await post({ type: 'mysql', name: 'db', password: 'secret' })).status, 400, 'passwords are never accepted');
+  // edit: set, change and clear the reference
+  const set = await owner.client.patch(`/api/services/${pg.body.id}`).send({ credentialsRef: 'pg-ro' });
+  assert.equal(set.status, 200, set.text);
+  assert.equal((await services())[1].credentialsRef, 'pg-ro');
+  const cleared = await owner.client.patch(`/api/services/${pg.body.id}`).send({ credentialsRef: null });
+  assert.equal(cleared.status, 200, cleared.text);
+  assert.deepEqual((await services())[1], { kind: 'postgres', name: 'pg', port: 5432 });
+  assert.equal((await owner.client.patch(`/api/services/${pg.body.id}`).send({ credentialsRef: 'NO' })).status, 400);
+  const sys = await post({ type: 'systemd', name: 'ssh', unit: 'ssh.service' });
+  assert.equal((await owner.client.patch(`/api/services/${sys.body.id}`).send({ credentialsRef: 'x' })).status, 400);
+  // the detail shows the reference (for editing) and the agent's detail string as-is
+  const now = new Date();
+  const row = await store.client.serviceItem.create({
+    data: { orgId: owner.orgId, agentId, name: 'sql', kind: 'mssql', state: 'running', detail: 'authenticated', reportedAt: now, lastSeen: now, firstSeen: now, stateChangedAt: now },
+  });
+  const detail = (await owner.client.get(`/api/services/${row.id}`)).body;
+  assert.equal(detail.credentialsRef, 'sql-main');
+  assert.equal(detail.detail, 'authenticated');
+  assert.equal(detail.type, 'database');
 });
 
 test('POST /api/services writes agent types into the host config and bumps the version', async () => {
@@ -164,17 +196,16 @@ test('POST /api/services validates, checks roles and scopes to the organization'
   const { agentId } = await enrollServer(app, owner, 1);
   const post = (body, who = owner) => who.client.post('/api/services').send(body);
   assert.equal((await post({ type: 'bogus', name: 'x' })).status, 400);
-  assert.equal((await post({ type: 'website', name: 'x' })).status, 400); // no url
+  assert.equal((await post({ type: 'website', name: 'x', url: site.url('/') })).status, 400); // websites live in Websites & APIs
   assert.equal((await post({ type: 'mysql', name: 'x' })).status, 400); // host required
   assert.equal((await post({ type: 'mysql', name: 'x', host: agentId, port: 70000 })).status, 400);
   assert.equal((await post({ type: 'mysql', name: 'x', host: agentId, extra: 1 })).status, 400);
-  assert.equal((await post({ type: 'website', name: 'x', url: 'http://10.0.0.1/' })).status, 400); // not public
   assert.equal((await post({ type: 'mysql', name: 'x', host: agentId }, other)).status, 404);
   const viewer = await addMember(app, store, owner, { role: 'viewer' });
   assert.equal((await post({ type: 'mysql', name: 'x', host: agentId }, viewer)).status, 403);
   const admin = await addMember(app, store, owner, { role: 'admin' });
   assert.equal((await post({ type: 'mysql', name: 'x', host: agentId }, admin)).status, 201);
-  const created = await post({ type: 'website', name: 'Site', url: site.url('/') });
+  const created = await post({ type: 'redis', name: 'Cache', host: agentId });
   assert.equal((await other.client.delete(`/api/services/${created.body.id}`)).status, 404);
   assert.equal((await viewer.client.delete(`/api/services/${created.body.id}`)).status, 403);
   assert.equal((await owner.client.delete('/api/services/not-an-id')).status, 404);

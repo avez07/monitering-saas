@@ -1,7 +1,11 @@
-import { assert } from '../lib/errors.js';
+import { assert, HttpError } from '../lib/errors.js';
 import { entitlements } from './limits.js';
 import { retentionCutoff } from './metrics.js';
-import { liveServers } from './servers.js';
+import { liveServers, requireServer, saveAgentSettings } from './servers.js';
+import { agentSettingsSchema, configForAgent } from './agent-config.js';
+import { select, tables } from '../lib/clickhouse.js';
+import { retentionDays } from './otel-usage.js';
+import { SEVERITY_LEVELS, levelOfSeverityNumber } from './otel-transform.js';
 import { registerMetricSource } from './alert-metrics.js';
 
 export const MISSING_AFTER_MS = 5 * 60000; // a container absent this long (while the server reports) is "removed"
@@ -233,7 +237,13 @@ export async function containerDetail(store, row, server) {
     orderBy: { createdAt: 'desc' },
     take: EVENTS_SHOWN,
   });
-  return { ...containerToApi(row, server), events: events.map(eventToApi) };
+  const agent = await store.find('agent', { id: row.agentId });
+  const setup = agent && (await configForAgent(store, agent));
+  return {
+    ...containerToApi(row, server),
+    events: events.map(eventToApi),
+    logsEnabled: collectsLogs(setup?.settings, row.name),
+  };
 }
 
 export const CONTAINER_RANGES = {
@@ -283,6 +293,162 @@ export async function containerMetrics(store, row, rangeKey) {
       restartCount: num(r.restarts === null ? null : Number(r.restarts)),
     })),
   };
+}
+
+// ---------------------------------------------------------------------------------------------- logs
+
+/** Severity words the agent (or an app) may write, by level, plus the matching OTLP severity numbers. */
+const LOG_LEVELS = {
+  error: { words: ['error', 'err', 'fatal', 'critical', 'crit', 'panic', 'emerg', 'alert'], from: 17, to: 24 },
+  warn: { words: ['warn', 'warning'], from: 13, to: 16 },
+  info: { words: ['info', 'information', 'notice'], from: 9, to: 12 },
+  debug: { words: ['debug', 'trace'], from: 1, to: 8 },
+};
+export const LOG_LEVEL_NAMES = Object.keys(LOG_LEVELS);
+function levelOf(text, number) {
+  const word = String(text || '').toLowerCase();
+  for (const [name, level] of Object.entries(LOG_LEVELS)) if (level.words.includes(word)) return name;
+  const byNumber = SEVERITY_LEVELS[levelOfSeverityNumber(Number(number)) - 1];
+  return { trace: 'debug', fatal: 'error' }[byNumber] ?? byNumber ?? '';
+}
+
+const ISO = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/;
+/** ISO time with up to 9 fraction digits -> nanoseconds since the epoch (BigInt). */
+export function isoToNanos(value) {
+  const match = ISO.exec(value);
+  const ms = match ? Date.parse(`${match[1]}${match[3]}`) : NaN;
+  assert(Number.isFinite(ms), 400, 'Times must be ISO 8601, for example 2026-11-22T10:00:00Z.');
+  return BigInt(ms) * 1000000n + BigInt((match[2] ?? '').padEnd(9, '0'));
+}
+/** Nanoseconds (string or BigInt) -> ISO time with all 9 fraction digits (round-trips through `since`). */
+export function nanosToIso(ns) {
+  const n = BigInt(ns);
+  const fraction = String(n % 1000000000n).padStart(9, '0');
+  return `${new Date(Number(n / 1000000000n) * 1000).toISOString().slice(0, 19)}.${fraction}Z`;
+}
+
+/** ClickHouse trouble becomes the usual structured 503, not a 500. */
+async function guarded(work) {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof HttpError || error.name === 'ZodError') throw error;
+    console.error('container logs query failed:', error.message);
+    throw new HttpError(503, 'Telemetry storage is unavailable. Try again shortly.', {
+      code: 'telemetry_unavailable',
+      service: 'clickhouse',
+    });
+  }
+}
+
+/**
+ * Log lines of one container (docs/api/advanced-telemetry.md section 5), oldest first.
+ * - Without `since`: the newest `limit` lines (up to `until`, within the plan's log retention).
+ * - With `since` (exclusive): the next `limit` lines after it, for live tail. Pass `nextSince` back as `since`.
+ * Lines are matched by organization, the reporting agent, and the container's name or Docker id.
+ */
+export async function containerLogs(store, row, { since, until, q, level, stream, limit = 200 } = {}) {
+  const { plan } = await entitlements(store, row.orgId);
+  const now = Date.now();
+  const floor = BigInt(now - retentionDays(plan.id) * 86400000) * 1000000n;
+  const sinceNs = since ? isoToNanos(since) : null;
+  const untilNs = until ? isoToNanos(until) : null;
+  const params = {
+    org: row.orgId,
+    agent: row.agentId,
+    name: row.name,
+    short: String(row.dockerId || '').slice(0, 12) || '-',
+    fromNs: String(sinceNs !== null && sinceNs > floor ? sinceNs : floor),
+    limit,
+  };
+  const filters = [
+    'OrgId = {org:String}',
+    "ResourceAttributes['yk.agent'] = {agent:String}",
+    "(ServiceName = {name:String} OR ResourceAttributes['container.name'] = {name:String} OR substring(ResourceAttributes['container.id'], 1, 12) = {short:String})",
+    sinceNs !== null && sinceNs > floor
+      ? 'Timestamp > fromUnixTimestamp64Nano({fromNs:Int64})'
+      : 'Timestamp >= fromUnixTimestamp64Nano({fromNs:Int64})',
+  ];
+  if (untilNs !== null) {
+    filters.push('Timestamp <= fromUnixTimestamp64Nano({untilNs:Int64})');
+    params.untilNs = String(untilNs);
+  }
+  if (level) {
+    const l = LOG_LEVELS[level];
+    filters.push('(lowerUTF8(SeverityText) IN {levelWords:Array(String)} OR SeverityNumber BETWEEN {levelFrom:UInt8} AND {levelTo:UInt8})');
+    Object.assign(params, { levelWords: l.words, levelFrom: l.from, levelTo: l.to });
+  }
+  if (stream) {
+    filters.push("LogAttributes['log.iostream'] = {stream:String}");
+    params.stream = stream;
+  }
+  (q ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 5)
+    .forEach((term, i) => {
+      filters.push(`positionCaseInsensitive(Body, {term${i}:String}) > 0`);
+      params[`term${i}`] = term;
+    });
+  const order = sinceNs !== null ? 'ASC' : 'DESC';
+  const rows = await guarded(() =>
+    select(
+      `SELECT toString(toUnixTimestamp64Nano(Timestamp)) AS ns, SeverityText AS severityText, SeverityNumber AS severityNumber,
+              LogAttributes['log.iostream'] AS stream, Body AS body
+         FROM ${tables.logs}
+        WHERE ${filters.join(' AND ')}
+        ORDER BY Timestamp ${order}, IngestSeq ${order}
+        LIMIT {limit:UInt32}`,
+      params,
+    ),
+  );
+  if (order === 'DESC') rows.reverse();
+  const items = rows.map((r) => ({
+    time: nanosToIso(r.ns),
+    stream: r.stream || '',
+    level: levelOf(r.severityText, r.severityNumber),
+    message: r.body,
+  }));
+  return { items, nextSince: items.length ? items.at(-1).time : (since ?? nanosToIso(BigInt(now) * 1000000n)) };
+}
+
+/** Whether the agent's settings collect this container's logs. */
+export function collectsLogs(settings, name) {
+  const cl = settings?.collectors?.containerLogs;
+  if (!cl?.enabled || cl.exclude?.includes(name)) return false;
+  return !cl.include?.length || cl.include.includes(name);
+}
+
+/**
+ * Turn log collection for one container on or off (PATCH /api/containers/:id/logs). On: the name leaves
+ * `exclude`, joins `include` when the list names containers (an empty list already means all), and logs
+ * are enabled. Off: the name leaves `include` and joins `exclude`; when that empties `include`, collection
+ * is switched off instead (an empty include list would mean every container).
+ */
+export async function setContainerLogs(store, row, enabled) {
+  const { agent, resource } = await requireServer(store, row.orgId, row.agentId);
+  const setup = await configForAgent(store, agent);
+  const settings = agentSettingsSchema.parse(setup.settings ?? {});
+  const cl = { ...settings.collectors.containerLogs };
+  const name = row.name;
+  const without = (list) => list.filter((n) => n !== name);
+  if (enabled) {
+    cl.exclude = without(cl.exclude);
+    if (!cl.enabled) {
+      cl.enabled = true;
+      cl.include = [name];
+    } else if (cl.include.length && !cl.include.includes(name)) cl.include = [...cl.include, name];
+  } else {
+    if (!cl.exclude.includes(name)) cl.exclude = [...cl.exclude, name];
+    if (cl.include.includes(name)) {
+      cl.include = without(cl.include);
+      if (!cl.include.length) cl.enabled = false;
+    }
+  }
+  const next = agentSettingsSchema.parse({ ...settings, collectors: { ...settings.collectors, containerLogs: cl } });
+  if (JSON.stringify(next.collectors.containerLogs) !== JSON.stringify(settings.collectors.containerLogs))
+    await saveAgentSettings(store, agent, next, resource.name);
+  return { enabled: collectsLogs(next, name), containerLogs: next.collectors.containerLogs };
 }
 
 // ---------------------------------------------------------------------------------------------- alerting

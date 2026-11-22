@@ -1,18 +1,57 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { assert } from '../lib/errors.js';
+import { assert, HttpError } from '../lib/errors.js';
 import { config } from '../config.js';
 import { credentialAuth } from '../services/auth.js';
 import { loadAgentContext, stillValid } from '../services/agent-cache.js';
 import { apiKeyAuth } from '../services/api-keys.js';
-import { entitlements, planLimit } from '../services/limits.js';
+import { entitlements, planLimit, orgPlanCached, hasFeature } from '../services/limits.js';
 import { registerServer } from '../services/agents.js';
-import { CONFIG_ID, configForAgent } from '../services/agent-config.js';
+import { CONFIG_ID, configForAgent, servedSettings } from '../services/agent-config.js';
 import { recordEvent, recordDeduped, trimEvents } from '../services/agent-events.js';
 import { digest } from '../lib/crypto.js';
 import { SERVICE_KINDS, SERVICE_STATES } from '../services/services.js';
 import { enqueueIngest } from '../queues/ingest.js';
 import { ingestOverloaded } from '../queues/ingest-queues.js';
+import { assertOrgActive } from '../services/platform-suspension.js';
+import {
+  decodeWriteRequest,
+  encodeWriteRequest,
+  relabel,
+  trackSeries,
+  markPromSeen,
+  promForwarder,
+} from '../services/prom-remote.js';
+
+/** remote_write body limit (compressed). Over it: 413. */
+const PROM_MAX_BODY = 4 * 1024 * 1024;
+const PROM_REQUESTS_PER_MINUTE = 60; // per agent: one every 15 s, plus buffered catch-up
+/**
+ * Read the raw request body up to `limit` bytes. remote_write uses Content-Encoding: snappy, which the
+ * body-parser middlewares refuse (415), so the bytes are collected here and decompressed by the route.
+ */
+function readRawBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const tooLarge = () => new HttpError(413, 'The remote_write body is larger than 4 MB.', { code: 'payload_too_large' });
+    // A body over the limit is drained (not kept) so the client reads the 413 instead of a reset connection;
+    // one far over it is cut off.
+    const chunks = [];
+    let size = 0;
+    let over = Number(req.headers['content-length']) > limit;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) over = true;
+      if (size > limit * 4) {
+        reject(tooLarge());
+        req.destroy();
+      } else if (!over) chunks.push(chunk);
+    });
+    req.on('end', () => (over ? reject(tooLarge()) : resolve(Buffer.concat(chunks))));
+    req.on('error', reject);
+  });
+}
+const retryLater = (res, seconds, code, error) =>
+  res.status(429).set('Retry-After', String(seconds)).json({ error, code, message: error });
 
 const FINGERPRINT = /^[a-f0-9]{64}$/;
 
@@ -157,6 +196,7 @@ export function v1Routes(store, limits) {
   router.post('/register', apiKeyAuth(store, limits), async (req, res) => {
     // Abuse protection lives in apiKeyAuth (failed keys per IP). Legitimate rollouts are bursty and often share
     // one NAT address, so the IP cap is generous and the per-key cap follows the plan's server limit.
+    await assertOrgActive(store, req.apiKey.orgId); // suspended by a platform admin: 403
     await limits.use(`register:ip:${req.ip}`, 1, REGISTER_PER_IP_HOUR, 3600);
     await limits.use(
       `register:key:${req.apiKey.id}`,
@@ -183,7 +223,7 @@ export function v1Routes(store, limits) {
       credential,
       endpoint: config.API_PUBLIC_URL,
       reconnected,
-      config: { ...configInfo(setup), settings: setup.settings },
+      config: { ...configInfo(setup), settings: await servedSettings(store, setup) },
     });
   });
 
@@ -209,7 +249,62 @@ export function v1Routes(store, limits) {
   router.get('/config', credentialAuth(store), async (req, res) => {
     const agent = await requireAgent(store, req);
     const setup = await configForAgent(store, agent);
-    res.json({ ...configInfo(setup), settings: setup.settings });
+    // collectors.prometheus always follows the plan, whatever the stored profile says.
+    // `plan.name` lets the agent log "Advanced metrics on (plan Pro)".
+    const plan = await orgPlanCached(store, agent.orgId);
+    res.json({ ...configInfo(setup), settings: await servedSettings(store, setup), plan: { name: plan.planName ?? null } });
+  });
+
+  /**
+   * Prometheus remote_write (docs/api/advanced-telemetry.md section 3). Premium only. The batch is relabelled
+   * (agent `yk_*` labels removed; yk_org / yk_agent added), checked against the org's series cap and queued
+   * for VictoriaMetrics; the answer does not wait for storage.
+   */
+  router.post('/prom/write', async (req, res) => {
+    const cached = await loadAgentContext(store, (req.headers.authorization || '').replace(/^Bearer /, ''));
+    assert(stillValid(cached), 401, 'Invalid or revoked agent credential.');
+    req.credential = cached.credential;
+    const { agent, resource } = cached;
+    await assertOrgActive(store, agent.orgId);
+    assert(resource && !resource.deletedAt, 403, 'This server was removed from your account.');
+    const plan = await orgPlanCached(store, agent.orgId);
+    if (!hasFeature(plan, 'promMetrics'))
+      throw new HttpError(402, 'Advanced metrics are part of the Pro and Business plans. The collector stays off until the plan includes them.', {
+        code: 'plan_feature_required',
+      });
+    try {
+      await limits.use(`prom:rate:${agent.id}`, 1, PROM_REQUESTS_PER_MINUTE, 60);
+    } catch (error) {
+      if (error.status === 429) return retryLater(res, 15, 'rate_limited', 'Too many remote_write requests from this server.');
+      throw error;
+    }
+    if (promForwarder.full()) return retryLater(res, 10, 'overloaded', 'Metrics ingest is busy. Retry shortly.');
+    const raw = Buffer.isBuffer(req.body) ? req.body : await readRawBody(req, PROM_MAX_BODY);
+    let batch;
+    try {
+      batch = relabel(decodeWriteRequest(raw), {
+        orgId: agent.orgId,
+        agentId: agent.id,
+      });
+    } catch (error) {
+      throw new HttpError(400, `The remote_write body could not be decoded: ${error.message}`, { code: 'invalid_payload' });
+    }
+    if (batch.series) {
+      const cap = config.PROM_MAX_SERIES_PER_ORG;
+      const cardinality = await trackSeries(agent.orgId, batch.hashes, cap);
+      if (cardinality.over)
+        return retryLater(res, 300, 'series_limit', `Your organization sent more than ${cap} distinct series this hour. Reduce labels or collectors.`);
+      // Samples per minute: every active series scraped every 15 s, with room for buffered catch-up.
+      try {
+        await limits.use(`prom:samples:${agent.orgId}`, batch.samples, cap * 8, 60);
+      } catch (error) {
+        if (error.status === 429) return retryLater(res, 30, 'sample_limit', 'Too many samples this minute for your organization.');
+        throw error;
+      }
+      promForwarder.push(encodeWriteRequest(batch.request));
+    }
+    markPromSeen(agent.orgId, agent.id).catch(() => {});
+    res.status(202).end();
   });
 
   router.post('/ingest', async (req, res) => {
@@ -221,6 +316,7 @@ export function v1Routes(store, limits) {
     assert(stillValid(cached), 401, 'Invalid or revoked agent credential.');
     req.credential = cached.credential;
     const { agent, resource, setup } = cached;
+    await assertOrgActive(store, agent.orgId); // suspended by a platform admin: 403 (cached id set, no query)
     await limits.use(`ingest:${agent.id}`, 1, 30, 60);
     const input = ingestBody.parse(req.body);
     assert(resource && !resource.deletedAt, 403, 'This server was removed from your account.');
@@ -248,6 +344,7 @@ async function requireAgent(store, req) {
   assert(agentId, 403, 'This credential cannot be used by an agent.');
   const agent = await store.find('agent', { id: agentId });
   assert(agent && agent.status !== 'revoked', 401, 'This server has been disconnected.');
+  await assertOrgActive(store, agent.orgId);
   return agent;
 }
 
@@ -259,6 +356,7 @@ const REJECTION_CODES = {
     429: 'rate_limited',
   },
   '/config': { 401: 'credential_revoked', 429: 'rate_limited' },
+  '/prom/write': { 400: 'invalid_payload', 401: 'credential_revoked', 413: 'payload_too_large' },
   '/register': { 402: 'plan_limit', 413: 'payload_too_large', 429: 'rate_limited' },
 };
 

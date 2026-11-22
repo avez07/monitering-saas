@@ -8,6 +8,7 @@ import {
   downgradeProblems,
   assertCanSwitch,
   processProviderEvent,
+  planChanged,
   GRACE_DAYS,
 } from '../services/billing.js';
 import { GST_RATE, GSTIN_PATTERN } from '../services/billing-tax.js';
@@ -110,6 +111,7 @@ export function billingRoutes(store) {
           pastDueSince: null,
           periodEnd: new Date(Date.now() + 3650 * 86400000),
         });
+      await planChanged(store, orgId);
       await audit(store, req.context, 'subscription.changed', plan.name);
       return res.json({ switched: true });
     }
@@ -217,6 +219,7 @@ export function billingRoutes(store) {
       input.interval,
       input.currency,
     );
+    await planChanged(store, req.context.orgId);
     await audit(store, req.context, 'subscription.changed', plan.name, { provider: 'mock' });
     res.json({ invoice, message: 'Plan updated. No money was charged (development mode).' });
   });

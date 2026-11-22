@@ -13,12 +13,17 @@ model User {
   email           String               @unique
   passwordHash    String
   emailVerifiedAt DateTime?
+  /// Yukti staff: may use /api/platform (granted only by `npm run admin:create`).
+  isPlatformAdmin Boolean              @default(false)
+  /// Set by a platform admin: the user cannot sign in and every session is revoked.
+  disabledAt      DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   memberships     OrganizationMember[]
   auditLogs       AuditLog[]
   sessions        Session[]
   accountTokens   AccountToken[]
+  platformAudits  PlatformAuditLog[]
 }
 
 /// Single-use, hashed tokens for email verification and password reset.
@@ -58,6 +63,9 @@ model Organization {
   name                 String
   slug                 String                @unique
   settings             Json                  @default("{}")
+  /// Suspended by a platform admin: the org API answers 423 and agent /v1 requests 403.
+  suspendedAt          DateTime?
+  suspendReason        String?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   members              OrganizationMember[]
@@ -285,6 +293,8 @@ model SubscriptionPlan {
   members                 Int
   alertRules              Int
   retentionDays           Int
+  /// Premium switches, e.g. {"advancedDashboard": true, "promMetrics": true} (docs/api/advanced-telemetry.md).
+  features                Json           @default("{}")
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
   subscriptions           Subscription[]
@@ -687,4 +697,20 @@ model TelemetrySettings {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// Every write made through the Yukti platform admin (/api/platform): who, what, on which record.
+model PlatformAuditLog {
+  id          String   @id @default(uuid())
+  adminUserId String
+  action      String
+  /// organization | user
+  targetType  String
+  targetId    String
+  details     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  admin       User     @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([targetType, targetId, createdAt])
 }

@@ -36,6 +36,16 @@ services:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8123/ping | grep -q Ok']
       interval: 5s
       retries: 15
+  # Prometheus remote_write storage for the premium dashboard (docs/api/advanced-telemetry.md). Loopback only.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    command: ['-storageDataPath=/storage', '-retentionPeriod=30d', '-httpListenAddr=:8428', '-search.maxPointsPerTimeseries=11000']
+    ports: ['127.0.0.1:8428:8428']
+    volumes: ['yuktiops-vm-data:/storage']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8428/health | grep -q OK']
+      interval: 5s
+      retries: 15
   # Optional transaction-mode PgBouncer (profile "pgbouncer"), to test the production connection path:
   #   docker compose --profile pgbouncer up -d pgbouncer
   #   DATABASE_URL=postgresql://USER:PASS@localhost:6432/DB?schema=public&pgbouncer=true&connection_limit=10
@@ -74,6 +84,7 @@ services:
       SMTP_HOST: mailpit
       REDIS_URL: redis://redis:6379/0
       CLICKHOUSE_URL: http://clickhouse:8123
+      VM_URL: http://victoriametrics:8428
     ports: ['127.0.0.1:${API_HOST_PORT:-4000}:4000']
     depends_on:
       postgres: { condition: service_healthy }
@@ -99,6 +110,7 @@ services:
       SMTP_HOST: mailpit
       REDIS_URL: redis://redis:6379/0
       CLICKHOUSE_URL: http://clickhouse:8123
+      VM_URL: http://victoriametrics:8428
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -129,3 +141,4 @@ volumes:
   yuktiops-postgres-data:
   yuktiops-redis-data:
   yuktiops-clickhouse-data:
+  yuktiops-vm-data:

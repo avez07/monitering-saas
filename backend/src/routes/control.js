@@ -23,6 +23,20 @@ export function controlRoutes(store, limits) {
   const router = Router();
   router.get('/bootstrap', async (req, res) => {
     const { orgId, user, membership } = req.context;
+    // Yukti staff with no organization of their own (auth() lets only them through without one).
+    if (!membership)
+      return res.json({
+        user,
+        organizations: [],
+        organization: null,
+        role: null,
+        projects: [],
+        subscription: null,
+        plan: null,
+        billingProvider: billingProvider.name,
+        apiPublicUrl: config.API_PUBLIC_URL,
+      });
+    // `organization.suspendedAt` / `suspendReason` tell the UI to show the suspended notice.
     const memberships = await store.list('organizationMember', { userId: user.id });
     const organizations = await Promise.all(
       memberships.map(async (m) => ({
@@ -31,6 +45,7 @@ export function controlRoutes(store, limits) {
       })),
     );
     const subscription = await store.find('subscription', { orgId });
+    const plan = await store.find('subscriptionPlan', { id: subscription.planId });
     res.json({
       user,
       organizations,
@@ -38,7 +53,8 @@ export function controlRoutes(store, limits) {
       role: membership.role,
       projects: await visibleProjects(store, req.context),
       subscription,
-      plan: await store.find('subscriptionPlan', { id: subscription.planId }),
+      // plan.features: premium switches the UI checks (docs/api/advanced-telemetry.md section 1).
+      plan: plan && { ...plan, features: plan.features ?? {} },
       billingProvider: billingProvider.name,
       apiPublicUrl: config.API_PUBLIC_URL,
     });

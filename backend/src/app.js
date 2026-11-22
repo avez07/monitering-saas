@@ -23,7 +23,9 @@ import { downloadsStatic, releasesRoute } from './routes/downloads.js';
 import { billingRoutes, billingWebhookRoutes } from './routes/billing.js';
 import { otlpRoutes } from './routes/otlp.js';
 import { appsRoutes } from './routes/apps.js';
+import { dashboardRoutes } from './routes/dashboards.js';
 import { internalRoutes } from './routes/metrics-internal.js';
+import { platformRoutes } from './routes/platform.js';
 
 export function createApp(store, limits) {
   const app = express();
@@ -85,6 +87,8 @@ export function createApp(store, limits) {
   app.use('/api/invites', publicInviteRoutes(store, limits));
   // Telegram calls this when someone presses Start on the bot; it authenticates with a secret header.
   app.use('/api/contacts/telegram', telegramWebhookRoutes(store));
+  // Yukti staff admin (CSRF-guarded session + isPlatformAdmin, no organization). Not /admin: that is Bull Board.
+  app.use('/api/platform', platformRoutes(store));
   const secured = express.Router();
   secured.use(csrfGuard);
   secured.use(auth(store));
@@ -101,6 +105,7 @@ export function createApp(store, limits) {
   secured.use(containerRoutes(store));
   secured.use(serviceRoutes(store));
   secured.use(appsRoutes(store));
+  secured.use(dashboardRoutes(store, limits));
   app.use('/api', secured);
   app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   if (existsSync(`${root}/frontend/dist/index.html`)) {

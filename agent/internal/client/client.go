@@ -173,17 +173,35 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, payload an
 		}
 		body = bytes.NewReader(c.body.Bytes())
 	}
+	headers := map[string]string{}
+	if payload != nil {
+		headers["Content-Type"] = "application/json"
+		if compress {
+			headers["Content-Encoding"] = "gzip"
+		}
+	}
+	return c.send(ctx, method, path, bearer, body, headers)
+}
+
+// Post sends a ready-made body (for example a snappy-compressed remote_write request) with the
+// agent credential. Unlike the JSON calls it uses no shared buffers, so it is safe to call from
+// several goroutines at once. path must be a path on the API host ("/v1/...").
+func (c *Client) Post(ctx context.Context, path, bearer string, body []byte, headers map[string]string) (*Response, error) {
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return nil, fmt.Errorf("invalid API path %q", path)
+	}
+	return c.send(ctx, http.MethodPost, path, bearer, bytes.NewReader(body), headers)
+}
+
+func (c *Client) send(ctx context.Context, method, path, bearer string, body io.Reader, headers map[string]string) (*Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-		if compress {
-			req.Header.Set("Content-Encoding", "gzip")
-		}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
@@ -294,7 +312,7 @@ type IngestResponse struct {
 	} `json:"config"`
 	// ConfigVersion is the settings version announced by the 202 Accepted answer (no profile id).
 	ConfigVersion int       `json:"configVersion"`
-	ServerTime time.Time `json:"serverTime"`
+	ServerTime    time.Time `json:"serverTime"`
 }
 
 // Ingest sends one batch of data points (gzip-compressed JSON).

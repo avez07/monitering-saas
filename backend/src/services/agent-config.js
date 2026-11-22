@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { forgetOrgFeatures, orgHasFeature } from './limits.js';
+import { CHANNELS, getRedis } from '../lib/redis.js';
 
 const flag = z.boolean().default(true);
 
@@ -12,14 +14,29 @@ const statusUrl = z
   .url()
   .refine((u) => /^https?:\/\//i.test(u), 'Use an http or https URL.');
 const portNumber = z.number().int().min(1).max(65535);
+/** Names a secret the agent reads locally (env or credentials.d/<ref>.env). The secret itself never reaches us. */
+export const credentialsRef = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'Use 1-40 lowercase letters, digits or -, starting with a letter or digit.');
+const containerName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/, 'Use a Docker container name.');
+/** Where remote_write goes, relative to the agent's API base URL. Always set by the server. */
+export const PROM_WRITE_PATH = '/v1/prom/write';
 const serviceEntry = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('systemd'), name: serviceName }).strict(),
   z.object({ kind: z.literal('process'), name: serviceName }).strict(),
   z.object({ kind: z.literal('port'), name: serviceName, port: portNumber, host: hostName.optional() }).strict(),
   z.object({ kind: z.literal('nginx'), name: serviceName, url: statusUrl }).strict(),
   z.object({ kind: z.literal('apache'), name: serviceName, url: statusUrl }).strict(),
-  ...['mysql', 'postgres', 'redis'].map((kind) =>
-    z.object({ kind: z.literal(kind), name: serviceName, port: portNumber.optional(), host: hostName.optional() }).strict(),
+  ...['mysql', 'postgres', 'redis', 'mssql'].map((kind) =>
+    z
+      .object({
+        kind: z.literal(kind),
+        name: serviceName,
+        port: portNumber.optional(),
+        host: hostName.optional(),
+        credentialsRef: credentialsRef.optional(),
+      })
+      .strict(),
   ),
 ]);
 /**
@@ -49,6 +66,24 @@ export const agentSettingsSchema = z
           .refine((list) => new Set(list.map((s) => `${s.kind}:${s.name.toLowerCase()}`)).size === list.length, {
             message: 'Each service kind and name may be listed only once.',
           }),
+        // Prometheus remote_write (premium). Set by the server from plan.features.promMetrics; users cannot change it.
+        prometheus: z.boolean().default(false),
+        // Docker container logs over OTLP (all plans, counted against the telemetry quota).
+        containerLogs: z
+          .object({
+            enabled: z.boolean().default(false),
+            include: z.array(containerName).max(200).default([]), // empty = every running container
+            exclude: z.array(containerName).max(200).default([]),
+          })
+          .strict()
+          .default({}),
+      })
+      .strict()
+      .default({}),
+    prometheus: z
+      .object({
+        path: z.string().max(100).regex(/^\/[A-Za-z0-9/_.-]*$/).default(PROM_WRITE_PATH),
+        scrapeIntervalSeconds: z.number().int().min(15).max(60).default(15),
       })
       .strict()
       .default({}),
@@ -89,4 +124,66 @@ export async function configForAgent(store, agent) {
     if (own) return own;
   }
   return ensureDefaultConfig(store, agent.orgId);
+}
+
+/**
+ * Overwrite what only the server decides: the Prometheus collector follows the plan and always writes to
+ * our endpoint. Applied whenever settings are saved or served, so a user cannot switch it on themselves.
+ */
+export function withPlanSettings(settings, promEnabled) {
+  return {
+    ...settings,
+    collectors: { ...settings.collectors, prometheus: Boolean(promEnabled) },
+    prometheus: { ...settings.prometheus, path: PROM_WRITE_PATH },
+  };
+}
+/** `withPlanSettings` for an organization's current plan. */
+export async function enforcePlanSettings(store, orgId, settings) {
+  return withPlanSettings(settings, await orgHasFeature(store, orgId, 'promMetrics'));
+}
+/** A setup profile as an agent should see it (stored settings plus the plan-controlled fields). */
+export async function servedSettings(store, setup) {
+  let settings;
+  try {
+    settings = agentSettingsSchema.parse(setup.settings ?? {});
+  } catch {
+    return setup.settings; // an unreadable stored profile is served as it is (the agent validates too)
+  }
+  return enforcePlanSettings(store, setup.orgId, settings);
+}
+
+/**
+ * The plan changed (billing, downgrade, dunning, platform admin). Every setup profile of the organization
+ * gets `collectors.prometheus = plan.features.promMetrics`; changed profiles get a new version, so agents
+ * re-pull their settings on the next ingest reply and start or stop the collector without a restart.
+ * Returns `{ enabled, changed }`.
+ */
+export async function onPlanChanged(store, orgId) {
+  await forgetOrgFeatures(orgId).catch((error) => console.error('agent-config: feature cache:', error.message));
+  const enabled = await orgHasFeature(store, orgId, 'promMetrics');
+  await ensureDefaultConfig(store, orgId);
+  let changed = 0;
+  for (const row of await store.list('agentConfig', { orgId })) {
+    let settings;
+    try {
+      settings = agentSettingsSchema.parse(row.settings ?? {});
+    } catch (error) {
+      console.error(`agent-config: profile ${row.id} is unreadable, plan change skipped:`, error.message);
+      continue;
+    }
+    const next = withPlanSettings(settings, enabled);
+    if (
+      row.settings?.collectors?.prometheus === next.collectors.prometheus &&
+      row.settings?.prometheus?.path === next.prometheus.path
+    )
+      continue;
+    await store.update('agentConfig', row.id, { settings: next, version: row.version + 1 });
+    changed++;
+  }
+  // The store already bumps the cache epoch on each write; this also makes other instances drop entries now.
+  if (changed)
+    await getRedis()
+      .publish(CHANNELS.agentInvalidate, '*')
+      .catch((error) => console.error('agent-config: invalidate publish failed:', error.message));
+  return { enabled, changed };
 }

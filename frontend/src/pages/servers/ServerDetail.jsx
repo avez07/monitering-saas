@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import {
   NavLink,
   Navigate,
@@ -15,6 +15,9 @@ import { serverStatus, statusLabel } from './status';
 import OverviewTab from './OverviewTab';
 import ConnectionTab from './ConnectionTab';
 import SettingsTab from './SettingsTab';
+
+// The advanced (Prometheus) dashboard is heavy: load it only when its tab opens.
+const DashboardView = lazy(() => import('@/pages/dashboards/DashboardView'));
 
 const tabClass = ({ isActive }) =>
   cn(
@@ -80,6 +83,9 @@ export default function ServerDetail() {
             </span>
           )}
         </NavLink>
+        <NavLink to={`/servers/${id}/advanced`} className={tabClass}>
+          Advanced
+        </NavLink>
         <NavLink to={`/servers/${id}/settings`} className={tabClass}>
           Settings
         </NavLink>
@@ -93,6 +99,14 @@ export default function ServerDetail() {
         <Route
           path="settings"
           element={<SettingsTab server={server} commands={connection.data?.commands} />}
+        />
+        <Route
+          path="advanced"
+          element={
+            <Suspense fallback={<LoadingState label="Loading dashboard…" />}>
+              <DashboardView fixedNode={id} server={server} />
+            </Suspense>
+          }
         />
         <Route path="*" element={<Navigate to={`/servers/${id}`} replace />} />
       </Routes>

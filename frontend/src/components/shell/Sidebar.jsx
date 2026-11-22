@@ -3,6 +3,7 @@ import {
   Activity,
   Bell,
   Container,
+  Gauge,
   Globe,
   Layers,
   LayoutDashboard,
@@ -24,6 +25,7 @@ export const NAV = [
   { to: '/containers', label: 'Containers', icon: Container },
   { to: '/services', label: 'Services', icon: Layers },
   { to: '/websites', label: 'Websites & APIs', icon: Globe },
+  { to: '/dashboards', label: 'Dashboards', icon: Gauge },
   { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -35,8 +37,10 @@ export const NAV_APPS = [
   { to: '/apps/connect', label: 'Connect your app', icon: Plug },
 ];
 
-const MAIN = NAV.slice(0, 5);
-const SETTINGS = NAV.slice(5);
+// Alerts and Settings sit in the footer; everything before them is the main list.
+const FOOTER_FROM = NAV.findIndex((i) => i.to === '/alerts');
+const MAIN = NAV.slice(0, FOOTER_FROM);
+const SETTINGS = NAV.slice(FOOTER_FROM);
 
 /** One nav link. Collapsed: icon only with a tooltip. Labels fade out instead of wrapping. */
 function NavItem({ to, label, icon: Icon, end, collapsed, onNavigate }) {

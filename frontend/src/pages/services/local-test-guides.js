@@ -122,6 +122,22 @@ export const LOCAL_TEST_GUIDES = {
       },
     ],
   },
+  mssql: {
+    title: 'Microsoft SQL Server',
+    intro: 'Run these on the host (or from a machine that can reach it).',
+    steps: [
+      {
+        title: 'Is the port open?',
+        code: 'nc -zv 127.0.0.1 1433   # Windows PowerShell: Test-NetConnection 127.0.0.1 -Port 1433',
+        healthy: 'Connection succeeded (TcpTestSucceeded : True). A refused connection means SQL Server is not listening on TCP: enable TCP/IP in SQL Server Configuration Manager.',
+      },
+      {
+        title: 'Can you run a query?',
+        code: `sqlcmd -S 127.0.0.1,1433 -U sa -Q "SELECT @@VERSION"`,
+        healthy: 'The SQL Server version is printed. "Login failed" still means the server is running.',
+      },
+    ],
+  },
   redis: {
     title: 'Redis',
     intro: 'Run these on the host (or from a machine that can reach it).',
@@ -244,7 +260,8 @@ export const LOCAL_TEST_GUIDES = {
 const ALIASES = {
   http: 'website', keyword: 'website', web: 'website', 'web page': 'website', url: 'website',
   mariadb: 'mysql', postgresql: 'postgres', httpd: 'apache', program: 'process',
-  'system service': 'systemd', 'tcp port': 'tcp', host: 'server', 'docker-host': 'server',
+  'system service': 'systemd', 'tcp port': 'tcp', port: 'tcp', host: 'server', 'docker-host': 'server',
+  sqlserver: 'mssql', 'sql server': 'mssql', 'microsoft sql server': 'mssql',
   'frontend app': 'frontend', 'backend app': 'backend',
 };
 

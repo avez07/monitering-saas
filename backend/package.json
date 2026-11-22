@@ -13,7 +13,9 @@
     "db:validate": "node scripts/validate-schema.mjs",
     "worker": "node src/worker.js",
     "worker:dev": "node --watch src/worker.js",
-    "ch:migrate": "node clickhouse/run.mjs"
+    "ch:migrate": "node clickhouse/run.mjs",
+    "admin:create": "node scripts/admin.mjs create",
+    "admin:revoke": "node scripts/admin.mjs revoke"
   },
   "dependencies": {
     "@clickhouse/client": "1.25.0",
@@ -27,6 +29,7 @@
     "nodemailer": "^10.1.2",
     "protobufjs": "8.8.1",
     "rate-limiter-flexible": "^11.5.0",
+    "snappyjs": "0.7.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -2,13 +2,14 @@ import { assert } from '../lib/errors.js';
 import { registerMetricSource } from './alert-metrics.js';
 import { serviceHealth } from './service-health.js';
 import { recordStateEvent, serverNames, eventToApi, STOPPED_INGESTS } from './containers.js';
+import { configForAgent } from './agent-config.js';
 
-export const SERVICE_KINDS = ['systemd', 'process', 'port', 'nginx', 'apache', 'mysql', 'postgres', 'redis'];
+export const SERVICE_KINDS = ['systemd', 'process', 'port', 'nginx', 'apache', 'mysql', 'postgres', 'mssql', 'redis'];
 export const SERVICE_STATES = ['running', 'stopped', 'failed', 'unknown'];
 export const SERVICE_GONE_AFTER_MS = 15 * 60000; // a service removed from the config disappears after this
 const FRESH_MS = 150000;
 /** Display grouping used by the dashboard (`type`); `kind` is the exact collector. */
-const TYPE_GROUP = { nginx: 'web', apache: 'web', mysql: 'database', postgres: 'database', redis: 'cache' };
+const TYPE_GROUP = { nginx: 'web', apache: 'web', mysql: 'database', postgres: 'database', mssql: 'database', redis: 'cache' };
 const isDown = (state) => state === 'stopped' || state === 'failed';
 
 /** Apply one service snapshot from an agent (see recordContainers for the idempotency rule). */
@@ -102,7 +103,26 @@ export async function serviceDetail(store, orgId, id) {
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
-  return { ...serviceToApi(row, servers.get(row.agentId)), events: events.map(eventToApi) };
+  return { ...serviceToApi(row, servers.get(row.agentId)), ...(await configuredFields(store, orgId, row)), events: events.map(eventToApi) };
+}
+
+/** What the host's config says about this service (for editing): address, status URL, credentials reference. Never a secret. */
+async function configuredFields(store, orgId, row) {
+  try {
+    const agent = await store.client.agent.findFirst({ where: { id: row.agentId, orgId } });
+    if (!agent) return {};
+    const services = (await configForAgent(store, agent)).settings?.collectors?.services ?? [];
+    const entry = services.find((s) => s.kind === row.kind && s.name === row.name);
+    if (!entry) return {};
+    return {
+      ...(entry.host ? { address: entry.host } : {}),
+      ...(entry.url ? { url: entry.url } : {}),
+      ...(entry.credentialsRef ? { credentialsRef: entry.credentialsRef } : {}),
+    };
+  } catch (error) {
+    console.error('service detail: config not read:', error?.message);
+    return {};
+  }
 }
 
 registerMetricSource('service_stopped', {

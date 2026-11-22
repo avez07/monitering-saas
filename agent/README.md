@@ -40,7 +40,7 @@ docker run -d --name yuktiops-agent --restart unless-stopped \
   ghcr.io/yuktiops/agent
 ```
 
-The `--pid host`, `--network host`, `-v /:/host:ro` and `HOST_ROOT` parts make the agent report the server itself. Without them it only sees its own container. Leave out the `docker.sock` and `--group-add` lines if you do not want container stats. The agent in the container is not root and the socket belongs to root, so `--group-add 0` is needed on Docker Desktop (Windows, Mac). On a Linux server use `--group-add $(stat -c '%g' /var/run/docker.sock)` instead (the socket's group is usually `docker`). Without it the agent runs but no containers appear.
+The `--pid host`, `--network host`, `-v /:/host:ro` and `HOST_ROOT` parts make the agent report the server itself. Without them it only sees its own container, and the advanced (node_exporter) metrics describe the container instead of the host. Container stats, cAdvisor metrics and container logs all need the `docker.sock` mount. Leave out the `docker.sock` and `--group-add` lines if you do not want container stats. The agent in the container is not root and the socket belongs to root, so `--group-add 0` is needed on Docker Desktop (Windows, Mac). On a Linux server use `--group-add $(stat -c '%g' /var/run/docker.sock)` instead (the socket's group is usually `docker`). Without it the agent runs but no containers appear.
 
 **Image says `denied` / `pull access denied`?** The GHCR package is private or not published yet. Either `docker login ghcr.io` (a GitHub token with `read:packages`), or build it yourself from this repository (works offline from the registry):
 
@@ -139,7 +139,7 @@ Then remove the server in the dashboard (Servers, choose the server, Remove).
 
 ## About the agent
 
-- A single static Go binary, no dependencies, about 7 MB. Linux amd64, arm64 and armv7. Runs as the unprivileged user `yuktiops` under systemd (`Restart=always`, starts on boot).
+- A single static Go binary, no dependencies, about 30 MB (it embeds the node_exporter collectors). Linux amd64, arm64 and armv7. Runs as the unprivileged user `yuktiops` under systemd (`Restart=always`, starts on boot).
 - Collects CPU, memory, swap, disk per mount, disk I/O, network per interface, load, uptime and the top 10 processes, every 30 seconds by default.
 - Target: under 25 MB RAM and 1% CPU. systemd enforces hard caps (`MemoryMax=64M`, `CPUQuota=10%`).
 
@@ -158,7 +158,27 @@ A container normally sees only itself. With `HOST_ROOT=/host` and the host's `/`
 Switched on from the setup profile in the dashboard (`collectors.docker`, `collectors.services`); nothing is collected until then. Both run in their own goroutine on the send interval, so a slow Docker daemon or a hanging port never delays sampling or sending.
 
 - **Docker** (`collectors.docker`): GET-only calls over `/var/run/docker.sock` (container list, inspect, one-shot stats; no SDK, other HTTP methods are refused in code). Reports state, restart count, CPU % (from counter deltas between two collections, so the first value appears one interval after start), memory without page cache, memory limit and OOM flag. At most 100 containers, 4 requests at a time, 20 s overall timeout. If the socket is not readable it reports `docker_socket_denied` (once an hour at most) and keeps running. The installer adds the `yuktiops` user to group `docker` only when the profile has Docker turned on (or `--docker` is given), because the socket is root-equivalent.
-- **Services** (`collectors.services`, up to 50): `systemd` (`systemctl show` for validated unit names only, `^[A-Za-z0-9@_.:-]+$`, never starting with `-`; the only program the agent ever runs), `process` (scans `/proc` comm and argv[0]), `port` (TCP connect, 3 s), `nginx` / `apache` (GET of the configured status URL, redirects not followed), and `redis` (`PING`), `mysql` (server greeting), `postgres` (SSLRequest) liveness probes without credentials. Every configured service is reported on every send.
+- **Services** (`collectors.services`, up to 50): `systemd` (`systemctl show` for validated unit names only, `^[A-Za-z0-9@_.:-]+$`, never starting with `-`; the only program the agent ever runs), `process` (scans `/proc` comm and argv[0]), `port` (TCP connect, 3 s), `nginx` / `apache` (GET of the configured status URL, redirects not followed), and `redis` (`PING`), `mysql` (server greeting), `postgres` (SSLRequest), `mssql` (TDS PRELOGIN, default port 1433) liveness probes without credentials. A database service with a `credentialsRef` also logs in (see Database credentials below). Every configured service is reported on every send.
+- **Container logs** (`collectors.containerLogs`, all plans, counts against the telemetry quota): follows the logs of running containers over the Docker socket (GET only), `include` / `exclude` by container name, and the Docker label `yuktiops.logs=false` opts a container out. Lines are sent as OTLP/HTTP JSON (gzip, up to 1 MB or every 2 s) to `/v1/otlp/logs` with the agent credential. At most 1000 lines per second per container; the last delivered timestamp per container is kept in the state directory, so a restart neither loses nor repeats lines. A `429` (quota used up) pauses logs only, for 5 minutes (`logs_quota`).
+
+### Advanced metrics (premium plans, Linux only)
+
+When the plan includes them (`collectors.prometheus`, set by YuktiOps from the plan, not by users), the agent sends Prometheus remote_write (protobuf + snappy) to `prometheus.path` (default `/v1/prom/write`) every `scrapeIntervalSeconds` (15 to 60, default 15):
+
+- **Node metrics**: the standard node_exporter metric names (`job="node"`), read from `HOST_ROOT` when set.
+- **Container metrics**: cAdvisor names (`container_*`, `job="cadvisor"`, label `name`) from the Docker socket, only when `collectors.docker` is on.
+- **Database metrics**: exporter-compatible names (`redis_*`, `mysql_global_status_*`, `pg_*`, `mssql_*`) for services with credentials.
+
+Plan changes switch it on or off without a restart (log line `Advanced metrics on (plan <name>)` / `Advanced metrics off`); a `402` from the API also turns it off. Unsent batches are queued (bounded, oldest dropped first) and retried with backoff.
+
+### Database credentials (stay on the server)
+
+A service entry only names a `credentialsRef` (for example `redis-main`); the secret is never sent to YuktiOps. The agent looks, in order, for:
+
+1. Environment variables `YUKTIOPS_CRED_<REF>_URL`, or `YUKTIOPS_CRED_<REF>_USER` with `_PASSWORD` (optional `_DATABASE`, `_SSLMODE`). `<REF>` is upper-cased with `-` turned into `_`: `redis-main` -> `YUKTIOPS_CRED_REDIS_MAIN_PASSWORD`. For systemd installs put them in `/etc/yuktiops/environment`; for Docker pass them with `-e`.
+2. The file `<configDir>/credentials.d/<ref>.env` (`/etc/yuktiops/credentials.d/redis-main.env`) with lines `URL=`, `USER=`, `PASSWORD=`, `DATABASE=`, `SSLMODE=`. In the Docker image the config dir is `/var/lib/yuktiops/config`. The file must be mode `0600` and owned by the agent's user (`yuktiops`; UID 65532 in the image), otherwise the service detail says `credentials file must be 0600`.
+
+Use a least-privilege user, for example Postgres `GRANT pg_monitor`, MySQL `GRANT PROCESS, REPLICATION CLIENT`, MSSQL `GRANT VIEW SERVER STATE` (the dashboard shows the exact commands).
 - A settings document with a malformed service entry (unknown kind, bad name/host/URL/port, duplicates) is rejected as a whole and reported as `config_invalid`; the previous settings stay in force.
 ## Commands
 
@@ -189,8 +209,9 @@ sudo yuktiops-agent doctor                # diagnose problems
 | `/etc/yuktiops/` | root:yuktiops 0750 | settings |
 | `/etc/yuktiops/credential` | root:yuktiops 0640 | this server's own credential (never the account API key) |
 | `/etc/yuktiops/agent.yaml` | root:yuktiops 0640 | settings (below) |
-| `/etc/yuktiops/environment` | root:yuktiops 0640, optional | `HTTPS_PROXY=...`, `NO_PROXY=...` for the service |
-| `/var/lib/yuktiops/` | yuktiops | offline buffer (`buffer.jsonl`), cached remote settings, `state.json` (read by `status`; no secrets) |
+| `/etc/yuktiops/environment` | root:yuktiops 0640, optional | `HTTPS_PROXY=...`, `NO_PROXY=...`, `YUKTIOPS_CRED_*` for the service |
+| `/etc/yuktiops/credentials.d/<ref>.env` | yuktiops 0600, optional | database credentials for a service's `credentialsRef` |
+| `/var/lib/yuktiops/` | yuktiops | offline buffer (`buffer.jsonl`), cached remote settings, container log checkpoints, `state.json` (read by `status`; no secrets) |
 
 ## Configuration file reference
 
@@ -214,7 +235,7 @@ setup_id: "st_0123456789abcdef01234567"
 
 What is collected and how often (`sendIntervalSeconds`, `sampleIntervalSeconds`, and which built-in collectors are on) is managed from the dashboard. The agent pulls it when the version announced in a response changes.
 
-Environment variables (for development and containers): `HOST_ROOT` (see below), `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_ALLOW_INSECURE` (development only: allow plain `http://` to any host), `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`.
+Environment variables (for development and containers): `HOST_ROOT` (see below), `YUKTIOPS_CONFIG_DIR`, `YUKTIOPS_STATE_DIR`, `YUKTIOPS_API_URL`, `YUKTIOPS_ALLOW_INSECURE` (development only: allow plain `http://` to any host), `YUKTIOPS_API_KEY` (used by `register`, and by `run` to register itself on first start in a container), `YUKTIOPS_NAME`, `YUKTIOPS_CRED_<REF>_*` (database credentials, above).
 
 ## Security model
 

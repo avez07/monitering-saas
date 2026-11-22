@@ -1,7 +1,7 @@
 import { assert } from '../lib/errors.js';
 import { entitlements } from './limits.js';
 import { retentionCutoff } from './metrics.js';
-import { agentSettingsSchema, configForAgent, newConfigId } from './agent-config.js';
+import { agentSettingsSchema, configForAgent, enforcePlanSettings, newConfigId } from './agent-config.js';
 
 const MIN_ONLINE_MS = 90000;
 export const RANGES = {
@@ -142,6 +142,7 @@ export async function updateServer(store, agent, resource, input) {
  * so the agent re-pulls); a shared or default profile is never edited, the agent gets its own copy instead.
  */
 export async function saveAgentSettings(store, agent, settings, copyName) {
+  settings = await enforcePlanSettings(store, agent.orgId, settings); // collectors.prometheus follows the plan
   const current = await configForAgent(store, agent);
   const sharing = await store.list('agent', { orgId: agent.orgId, configId: current.id });
   const dedicated = !current.isDefault && sharing.every((a) => a.id === agent.id);

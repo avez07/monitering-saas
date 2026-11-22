@@ -480,10 +480,17 @@ export async function drainIngest(store, { timeoutMs = 20000 } = {}) {
     stop: startIngestWorkers({ store, roles: ['ingest'], lastSeen: false, flushMs: 25 }),
   };
   const { stop } = testRuntime;
-  const deadline = Date.now() + timeoutMs;
+  // The timeout counts time this loop was actually running. A single pass that takes far longer than any
+  // real pass can (the host was suspended, or the process was paused) does not use up the budget.
+  const STALL_MS = 10000;
+  let deadline = Date.now() + timeoutMs;
   let quiet = 0;
+  let last = Date.now();
   while (quiet < 2) {
-    if (Date.now() > deadline) throw new Error('drainIngest timed out');
+    const now = Date.now();
+    if (now - last > STALL_MS) deadline += now - last;
+    last = now;
+    if (now > deadline) throw new Error('drainIngest timed out');
     await stop.flush();
     const waiting = (await busyCounts(ingestQueue())) + (await busyCounts(sideEffectsQueue()));
     quiet = waiting === 0 && stop.idle() ? quiet + 1 : 0;

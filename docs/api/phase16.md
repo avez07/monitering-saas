@@ -20,29 +20,37 @@ All routes are cookie-authenticated under `/api`. Errors are `{ "error": "..." }
 
 ## C.3 `POST /api/services` and `DELETE /api/services/:id`
 
+Services are things running **on a host** with the agent. Websites, APIs and public TCP ports are uptime monitors and are
+added under Websites & APIs (`POST /api/websites`), never here.
+
 Owner or admin only (403 otherwise). Everything is scoped to the caller's organization.
 
 Body (strict, Zod):
 
 ```json
-{ "type": "website|api|tcp|nginx|apache|mysql|postgres|redis|systemd|process",
+{ "type": "tcp|nginx|apache|mysql|postgres|mssql|redis|systemd|process",
   "name": "string 1..100",
-  "host": "agent id (optional)",
-  "port": 1, "url": "http(s) url", "address": "hostname or IP (public tcp only)",
-  "unit": "systemd unit", "processName": "process name" }
+  "host": "agent id (required)",
+  "port": 1, "url": "http(s) url (nginx, apache)", "address": "hostname or IP the agent dials (tcp and databases, optional)",
+  "unit": "systemd unit", "processName": "process name",
+  "credentialsRef": "optional, databases only: ^[a-z0-9][a-z0-9-]{0,39}$" }
 ```
 
-Routing:
+Every type needs `host`. Without it: 400. For `tcp` the message is
+`"Choose the host. For a public address use Websites & APIs."`. `website` and `api` are not valid types (400).
 
-| type | no `host` | with `host` |
-|---|---|---|
-| `website` | Websites & APIs monitor (type `http`), needs `url` | same (monitor; `host` ignored) |
-| `api` | monitor (type `api`), needs `url` | same |
-| `tcp` | public TCP monitor, needs `address` and `port` | agent entry `{kind:"port", name, port, host: address?}` |
-| `nginx`, `apache` | 400 (host required) | agent entry; `url` optional (default `http://127.0.0.1/nginx_status`, `http://127.0.0.1/server-status?auto`) |
-| `mysql`, `postgres`, `redis` | 400 | agent entry, `port` optional |
-| `systemd` | 400 | agent entry, name = `unit` (falls back to `name`) |
-| `process` | 400 | agent entry, name = `processName` (falls back to `name`) |
+| type | agent entry written to the host's config |
+|---|---|
+| `tcp` | `{kind:"port", name, port, host: address?}`, `port` required |
+| `nginx`, `apache` | `{kind, name, url}`; `url` optional (default `http://127.0.0.1/nginx_status`, `http://127.0.0.1/server-status?auto`) |
+| `mysql`, `postgres`, `mssql`, `redis` | `{kind, name, port, host: address?, credentialsRef?}`; `port` defaults to 3306, 5432, 1433, 6379 |
+| `systemd` | `{kind:"systemd", name}`, name = `unit` (falls back to `name`) |
+| `process` | `{kind:"process", name}`, name = `processName` (falls back to `name`) |
+
+`credentialsRef` (databases only, else 400) names a secret the agent reads on the host, from the environment
+(`YUKTIOPS_CRED_<REF>_USER` / `_PASSWORD`, or `_URL`) or `<configDir>/credentials.d/<ref>.env` (mode 0600). YuktiOps never
+receives or stores the password. See docs/api/advanced-telemetry.md section 6. The agent reports the result in the
+service's `detail` (`authenticated`, `auth failed: wrong user or password`, `credentials not found`, ...).
 
 Agent entries are appended to the host's AgentConfig `collectors.services[]` (same bump/copy rules as
 `PATCH /api/servers/:id`), so the agent picks it up on its next config pull.
@@ -50,35 +58,36 @@ Agent entries are appended to the host's AgentConfig `collectors.services[]` (sa
 Response `201`:
 
 ```json
-{ "id": "...", "status": "pending", "source": "monitor|agent", "type": "website", "kind": "http|api|tcp|nginx|...",
-  "name": "...", "serverId": "agent id | null", "monitorId": "uuid | null" }
+{ "id": "cfg....", "status": "pending", "source": "agent", "type": "mssql", "kind": "port|nginx|mssql|...",
+  "name": "...", "serverId": "agent id", "monitorId": null }
 ```
 
-`id` for `source:"monitor"` is the monitor id. For `source:"agent"` it is `cfg.<agentId>.<kind>.<base64url(name)>`
-until the agent reports the service, after which the service has its normal uuid in `GET /api/services`.
+`id` is `cfg.<agentId>.<kind>.<base64url(name)>` until the agent reports the service, after which the service has its
+normal uuid in `GET /api/services`. `source` is always `agent` and `monitorId` always `null` (kept for compatibility).
 
-Errors: 400 validation (missing url/host/port, bad url), 402 plan monitor limit, 403 role, 404 host not found,
+`GET /api/services/:id` also returns what the host's config holds for the service, when present: `address`, `url` and
+`credentialsRef` (never a secret).
+
+Errors: 400 validation (missing host/port, bad url, bad `credentialsRef`), 403 role, 404 host not found,
 409 service with the same kind and name already configured on that host.
 
 `DELETE /api/services/:id` (204): accepts a reported service uuid (removes its entry from the host's
-`collectors.services[]` and the reported row), a `cfg.` id (removes the config entry), or a monitor id (removes the
-monitor, same as `DELETE /api/websites/:id`). Unknown or other-org ids: 404. Idempotent for reported rows: a row whose host
-is gone is still removed.
+`collectors.services[]` and the reported row) or a `cfg.` id (removes the config entry). Unknown or other-org ids, and
+monitor ids: 404 (use `DELETE /api/websites/:id`). Idempotent for reported rows: a row whose host is gone is still removed.
 
 ### `PATCH /api/services/:id` (admin)
 
-Body: any subset of `{ name, url, host, port, address, unit, processName, intervalSeconds, failureThreshold }`
+Body: any subset of `{ name, url, host, port, address, unit, processName, credentialsRef }`
 (strict, at least one field; `type` cannot change). Fields that do not apply to the service are 400
 (`"<field> cannot be changed on a <kind> service."`).
 
-- Monitor ids (website/api/tcp): `name`, `url` (http/https) or `address`+`port` (tcp), `intervalSeconds` (>= plan minimum, else
-  402), `failureThreshold` (1-10). The target is re-resolved (blocked/private addresses are 400).
-- Agent entries (reported uuid or `cfg.` id): `name`, plus `unit` (systemd), `processName` (process), `port`/`address`
-  (port, mysql, postgres, redis; address is stored as the entry's `host`), `url` (nginx, apache). `host` may only repeat the
-  current host. Same bump/copy rules as POST.
+- Accepts a reported uuid or a `cfg.` id: `name`, plus `unit` (systemd), `processName` (process), `port`/`address`
+  (port, mysql, postgres, mssql, redis; address is stored as the entry's `host`), `url` (nginx, apache), `credentialsRef`
+  (mysql, postgres, mssql, redis; `null` or `""` removes it). `host` may only repeat the current host. Same bump/copy
+  rules as POST.
 
-Response 200, same shape as POST: `{ id, status, source, type, kind, name, serverId, monitorId }`. For `source:"agent"` the
-returned `id` is the `cfg.` id of the edited entry and **changes when the name changes**. Errors: 400, 402, 403, 404, 409
+Response 200, same shape as POST: `{ id, status, source, type, kind, name, serverId, monitorId }`. The returned `id` is
+the `cfg.` id of the edited entry and **changes when the name changes**. Errors: 400, 403, 404, 409
 (duplicate kind+name on the host). Audit: `service.updated`.
 
 ## C.4 Rupee-first billing

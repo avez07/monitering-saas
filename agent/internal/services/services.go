@@ -1,8 +1,11 @@
 // Package services checks the services named in the remote settings: systemd units, processes,
-// local TCP ports, nginx/Apache status pages and Redis, MySQL and PostgreSQL liveness.
+// local TCP ports, nginx/Apache status pages and Redis, MySQL, PostgreSQL and SQL Server liveness.
 //
-// Everything is read-only and credential-free. The only program ever executed is `systemctl show`
-// with a validated unit name; nothing else is run, whatever the settings say.
+// Everything is read-only. Liveness checks are credential-free; a database service with a
+// credentialsRef is additionally logged in to with credentials read from this machine only
+// (see creds.go), and the secret is never logged or sent to YuktiOps. The only program ever
+// executed is `systemctl show` with a validated unit name; nothing else is run, whatever the
+// settings say.
 package services
 
 import (
@@ -51,6 +54,10 @@ type Checker struct {
 	// Systemctl runs `systemctl show` for a unit and returns its output.
 	Systemctl func(ctx context.Context, unit string) (string, error)
 	HTTP      *http.Client
+	// Creds finds credentials for services with a credentialsRef (nil: none configured).
+	Creds *CredentialStore
+	// Query logs in to a database (QueryDB; replaced in tests).
+	Query func(ctx context.Context, s remote.Service, creds Credentials, metrics bool) ([]Metric, error)
 }
 
 // New returns a checker for the running system.
@@ -58,6 +65,7 @@ func New() *Checker {
 	return &Checker{
 		ProcRoot:  config.HostPath(config.HostRoot(), "/proc"),
 		Systemctl: runSystemctl,
+		Query:     QueryDB,
 		HTTP: &http.Client{
 			Timeout: checkTimeout,
 			Transport: &http.Transport{
@@ -101,10 +109,32 @@ func (c *Checker) Check(ctx context.Context, list []remote.Service) []Result {
 			cctx, cancel := context.WithTimeout(ctx, checkTimeout+time.Second)
 			defer cancel()
 			out[i] = c.one(cctx, s, procs)
+			if out[i].State == "running" && s.CredentialsRef != "" && isDatabase(s.Kind) {
+				out[i].Detail = c.authenticate(ctx, s)
+			}
 		}(i, s)
 	}
 	wg.Wait()
 	return out
+}
+
+func isDatabase(kind string) bool {
+	return kind == "redis" || kind == "mysql" || kind == "postgres" || kind == "mssql"
+}
+
+// authenticate logs in with the service's local credentials and returns the status detail:
+// "authenticated", "auth failed: wrong user or password", "credentials not found", ...
+func (c *Checker) authenticate(ctx context.Context, s remote.Service) string {
+	creds, err := c.Creds.Load(s.CredentialsRef)
+	if err != nil {
+		return AuthDetail(err)
+	}
+	query := c.Query
+	if query == nil {
+		query = QueryDB
+	}
+	_, err = query(ctx, s, creds, false)
+	return AuthDetail(err)
 }
 
 func (c *Checker) one(ctx context.Context, s remote.Service, procs map[string]bool) Result {
@@ -140,7 +170,7 @@ func (c *Checker) one(ctx context.Context, s remote.Service, procs map[string]bo
 		if r.State == "running" {
 			ms()
 		}
-	case "redis", "mysql", "postgres":
+	case "redis", "mysql", "postgres", "mssql":
 		conn, err := dial(ctx, host, s.Port)
 		if err != nil {
 			r.Detail = dialDetail(err)
@@ -218,6 +248,8 @@ func probe(kind string, conn net.Conn) (string, bool) {
 			return "responding", true
 		}
 		return "unexpected reply", false
+	case "mssql":
+		return probeMSSQL(conn)
 	}
 	return "", false
 }

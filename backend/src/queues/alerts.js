@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { getQueue, startWorker } from './factory.js';
 import { evaluateAlerts } from '../services/alerting.js';
+import { suspendedOrgIds } from '../services/platform-suspension.js';
 
 export const ALERTS_QUEUE = 'alerts';
 export const ALERTS_CONCURRENCY = 10;
@@ -32,7 +33,10 @@ export async function orgsToEvaluate(store) {
       distinct: ['orgId'],
     }),
   ]);
-  return [...new Set([...rules.map((r) => r.orgId), ...open.map((i) => i.orgId)])];
+  const suspended = await suspendedOrgIds(store); // platform-suspended orgs are not evaluated
+  return [...new Set([...rules.map((r) => r.orgId), ...open.map((i) => i.orgId)])].filter(
+    (orgId) => !suspended.has(orgId),
+  );
 }
 
 /** Queue one evaluation per organization. The id carries the time bucket, so a tick is never doubled. */

@@ -1,6 +1,8 @@
 import { lazy } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AppShell } from '@/components/shell/AppShell';
+import { AdminShell } from '@/components/shell/AdminShell';
+import { SuspendedNotice } from '@/components/shell/SuspendedNotice';
 import { ErrorState, LoadingState } from '@/components/app/states';
 import { useSession } from '@/lib/session';
 
@@ -13,12 +15,14 @@ const Auth = lazy(() => import('@/pages/auth'));
 const Overview = lazy(() => import('@/pages/overview'));
 const Servers = lazy(() => import('@/pages/servers'));
 const Containers = lazy(() => import('@/pages/containers'));
+const Dashboards = lazy(() => import('@/pages/dashboards'));
 const Services = lazy(() => import('@/pages/services'));
 const Websites = lazy(() => import('@/pages/websites'));
 const Alerts = lazy(() => import('@/pages/alerts'));
 const Settings = lazy(() => import('@/pages/settings'));
 const Apps = lazy(() => import('@/pages/apps'));
 const AddServer = lazy(() => import('@/pages/add-server'));
+const Admin = lazy(() => import('@/pages/admin'));
 
 /** Signed-out only (login, register, forgot password): signed-in users go to the dashboard. */
 function GuestOnly() {
@@ -45,6 +49,21 @@ function RequireAuth() {
   return <Outlet />;
 }
 
+/** Yukti staff only (platform admin): everyone else goes back to the dashboard. */
+function RequirePlatformAdmin() {
+  const { isPlatformAdmin } = useSession();
+  if (!isPlatformAdmin) return <Navigate to="/" replace />;
+  return <Outlet />;
+}
+
+/** The customer app needs an organization that is not suspended (staff without one go to /admin). */
+function RequireActiveOrg() {
+  const { organization, isPlatformAdmin, suspended } = useSession();
+  if (!organization && isPlatformAdmin) return <Navigate to="/admin" replace />;
+  if (suspended) return <SuspendedNotice />;
+  return <Outlet />;
+}
+
 export const routes = [
   {
     element: <GuestOnly />,
@@ -64,18 +83,30 @@ export const routes = [
     element: <RequireAuth />,
     children: [
       {
-        element: <AppShell />,
+        element: <RequirePlatformAdmin />,
         children: [
-          { path: '/', element: <Overview /> },
-          { path: '/servers/*', element: <Servers /> },
-          { path: '/containers', element: <Containers /> },
-          { path: '/services/*', element: <Services /> },
-          { path: '/websites/*', element: <Websites /> },
-          { path: '/apps/*', element: <Apps /> },
-          { path: '/alerts/*', element: <Alerts /> },
-          { path: '/settings/*', element: <Settings /> },
-          { path: '/add-server', element: <AddServer /> },
-          { path: '*', element: <Navigate to="/" replace /> },
+          { element: <AdminShell />, children: [{ path: '/admin/*', element: <Admin /> }] },
+        ],
+      },
+      {
+        element: <RequireActiveOrg />,
+        children: [
+          {
+            element: <AppShell />,
+            children: [
+              { path: '/', element: <Overview /> },
+              { path: '/servers/*', element: <Servers /> },
+              { path: '/containers/*', element: <Containers /> },
+              { path: '/dashboards/*', element: <Dashboards /> },
+              { path: '/services/*', element: <Services /> },
+              { path: '/websites/*', element: <Websites /> },
+              { path: '/apps/*', element: <Apps /> },
+              { path: '/alerts/*', element: <Alerts /> },
+              { path: '/settings/*', element: <Settings /> },
+              { path: '/add-server', element: <AddServer /> },
+              { path: '*', element: <Navigate to="/" replace /> },
+            ],
+          },
         ],
       },
     ],

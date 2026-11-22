@@ -48,7 +48,7 @@ export default function ServiceList() {
     <EmptyState
       icon={Workflow}
       title="No services yet"
-      text="Watch a website, an API, a database, nginx or any system service. You can add one here without leaving this page."
+      text="Watch what runs on your hosts: databases, nginx, open ports, programs or any system service. Websites and APIs are under Websites & APIs."
       action={{ label: 'Add a service', onClick: () => setDialog(true) }}
     />
   );

@@ -14,6 +14,7 @@ import {
   clearSessionCookie,
   resolveSession,
   publicUser,
+  DISABLED_MESSAGE,
 } from '../services/auth.js';
 
 const email = z
@@ -48,6 +49,8 @@ export function authRoutes(store, limits) {
       await limits.record(`login:fail:${input.email}`, 900);
       assert(false, 401, 'Email or password is incorrect.');
     }
+    // Only after the password checks out, so the response never reveals whether an account is disabled.
+    assert(!user.disabledAt, 403, DISABLED_MESSAGE);
     await startSession(store, req, res, user);
     res.json({ user: publicUser(user) });
   });

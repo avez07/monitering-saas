@@ -26,7 +26,9 @@ import (
 	"github.com/yuktiops/agent/internal/client"
 	"github.com/yuktiops/agent/internal/collect"
 	"github.com/yuktiops/agent/internal/config"
+	"github.com/yuktiops/agent/internal/prom"
 	"github.com/yuktiops/agent/internal/remote"
+	"github.com/yuktiops/agent/internal/services"
 	"github.com/yuktiops/agent/internal/state"
 )
 
@@ -75,6 +77,15 @@ type runner struct {
 	snap      atomic.Pointer[snapshot]
 	// dockerSocket overrides the default socket path (tests).
 	dockerSocket string
+
+	// Advanced collectors (advanced.go).
+	advWake       chan struct{}
+	credShared    atomic.Pointer[string]
+	creds         *services.CredentialStore
+	hostName      string
+	promSupported bool
+	runProm       func(ctx context.Context, cfg *remote.Config) error
+	runLogs       func(ctx context.Context, cfg *remote.Config) error
 
 	// Test hooks.
 	now          func() time.Time
@@ -139,7 +150,15 @@ func newRunner(opts Options) (*runner, error) {
 		maxChunk:    maxChunkPoints,
 		configRetry: configRetryAfter,
 		credential:  cred,
+		advWake:     make(chan struct{}, 1),
+		creds:       services.NewCredentialStore(opts.Paths.ConfigDir),
+		hostName:    hostName(config.HostRoot(), cfg.Name),
+
+		promSupported: prom.NodeSupported,
 	}
+	r.credShared.Store(&cred)
+	r.runProm = r.defaultRunProm
+	r.runLogs = r.defaultRunLogs
 	r.credentialStat, _ = statCredential(opts.Paths.CredentialFile())
 	return r, nil
 }
@@ -188,7 +207,8 @@ func (r *runner) run(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
+	go func() { defer wg.Done(); r.advancedLoop(ctx) }()
 	go func() { defer wg.Done(); r.watchLoop(ctx) }()
 	go func() { defer wg.Done(); r.sampleLoop(ctx) }()
 	go func() { defer wg.Done(); r.sendLoop(ctx) }()
@@ -310,6 +330,7 @@ func (r *runner) reloadCredential() bool {
 		return false
 	}
 	r.credential = cred
+	r.credShared.Store(&cred)
 	return true
 }
 
@@ -553,6 +574,7 @@ func (r *runner) pullConfigIfChanged(ctx context.Context, res *client.IngestResp
 	case r.watchWake <- struct{}{}:
 	default:
 	}
+	r.wakeAdvanced()
 	if err := remote.SaveCache(r.opts.Paths.RemoteConfigFile(), cfg); err != nil && !r.warnedState {
 		r.warnedState = true
 		r.log.Printf("Warning: could not cache the settings in %s: %v", r.opts.Paths.StateDir, err)

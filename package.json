@@ -23,6 +23,8 @@
     "db:generate": "npm run db:generate -w backend",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
+    "admin:create": "node backend/scripts/admin.mjs create",
+    "admin:revoke": "node backend/scripts/admin.mjs revoke",
     "agent": "node backend/scripts/agent.mjs",
     "agent:build": "node agent/scripts/dist.mjs --host",
     "agent:dist": "node agent/scripts/dist.mjs",

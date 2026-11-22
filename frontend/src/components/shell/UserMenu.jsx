@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Settings, User } from 'lucide-react';
+import { LogOut, Settings, ShieldCheck, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -23,7 +23,7 @@ const initials = (name = '?') =>
 
 /** Account dropdown: profile, org switcher, settings, sign out. */
 export function UserMenu({ side = 'bottom', align = 'end', className }) {
-  const { user, organization, organizations, switchOrganization, signOut } = useSession();
+  const { user, organization, organizations, switchOrganization, signOut, isPlatformAdmin } = useSession();
   const navigate = useNavigate();
   return (
     <DropdownMenu>
@@ -63,13 +63,26 @@ export function UserMenu({ side = 'bottom', align = 'end', className }) {
             ))}
           </>
         )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/settings/account')}>
-          <User className="mr-2 size-4" aria-hidden="true" /> Account
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => navigate('/settings')}>
-          <Settings className="mr-2 size-4" aria-hidden="true" /> Settings
-        </DropdownMenuItem>
+        {isPlatformAdmin && (
+          <>
+            <DropdownMenuSeparator />
+            {/* Staff only: the Yukti platform admin. */}
+            <DropdownMenuItem onSelect={() => navigate('/admin')}>
+              <ShieldCheck className="mr-2 size-4" aria-hidden="true" /> Yukti Admin
+            </DropdownMenuItem>
+          </>
+        )}
+        {organization && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate('/settings/account')}>
+              <User className="mr-2 size-4" aria-hidden="true" /> Account
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate('/settings')}>
+              <Settings className="mr-2 size-4" aria-hidden="true" /> Settings
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={signOut}>
           <LogOut className="mr-2 size-4" aria-hidden="true" /> Sign out

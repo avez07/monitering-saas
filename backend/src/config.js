@@ -57,6 +57,10 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_BOT_NAME: z.string().default(''),
   TELEGRAM_WEBHOOK_SECRET: z.string().default(''),
+  // VictoriaMetrics (Prometheus remote_write storage for the premium dashboard).
+  VM_URL: z.string().url().default('http://localhost:8428'),
+  // Active series one organization may write per hour (cardinality guard on /v1/prom/write).
+  PROM_MAX_SERIES_PER_ORG: z.coerce.number().int().min(1).default(50000),
 });
 
 /** Parse and validate environment variables. Exported so production rules can be tested. */

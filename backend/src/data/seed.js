@@ -1,4 +1,6 @@
 // Plan definitions (see PLAN.md section 3). Prices are seed data until billing ships.
+/** Premium switches (docs/api/advanced-telemetry.md section 1). */
+const PREMIUM = { advancedDashboard: true, promMetrics: true };
 export const plans = [
   {
     id: 'free',
@@ -13,6 +15,7 @@ export const plans = [
     members: 1,
     alertRules: 5,
     retentionDays: 7,
+    features: {},
   },
   {
     id: 'starter',
@@ -27,6 +30,7 @@ export const plans = [
     members: 3,
     alertRules: 20,
     retentionDays: 30,
+    features: {},
   },
   {
     id: 'pro',
@@ -41,6 +45,7 @@ export const plans = [
     members: 10,
     alertRules: 100,
     retentionDays: 90,
+    features: PREMIUM,
   },
   {
     id: 'business',
@@ -55,6 +60,7 @@ export const plans = [
     members: 1000,
     alertRules: 500,
     retentionDays: 365,
+    features: PREMIUM,
   },
 ];
 

@@ -11,6 +11,7 @@ Run every command from the repository root. You need **Node.js 22.12+**, npm and
 | 5432 | PostgreSQL + TimescaleDB (Docker)         | `postgresql://yuktiops@localhost:5432` |
 | 1025 | Mailpit SMTP (Docker)                     | where every email is sent in dev       |
 | 8025 | Mailpit inbox (Docker)                    | http://localhost:8025                  |
+| 8428 | VictoriaMetrics (Docker, premium metrics) | http://localhost:8428/health           |
 | 4321 | Marketing site (`npm run site:dev`)       | http://localhost:4321                  |
 
 The browser tests use their own API on **4060** and the database `yuktiops_e2e`; the backend tests use `yuktiops_test`. Neither touches your development data.
@@ -19,11 +20,13 @@ The browser tests use their own API on **4060** and the database `yuktiops_e2e`;
 
 ```powershell
 Copy-Item .env.example .env        # only if you do not have a .env yet
-docker compose up -d postgres mailpit
+docker compose up -d postgres mailpit victoriametrics
 npm install
 npm run db:generate
 npm run db:migrate
 ```
+
+**After pulling new code**, run `npm install`, `npm run db:migrate` and `npm run db:seed` (new tables and plan features, for example the premium advanced metrics and platform admin).
 
 `.env` holds local dummy values only. `APP_URL` must match the address you open in the browser (default `http://localhost:5173`), or the API answers "Cross-site request blocked".
 
@@ -56,6 +59,8 @@ Or open all three at once: `npm run dev:terminals` (Windows: `scripts/dev-termin
 7. **Websites & APIs**: add a website. Checks run from the worker (every 30 s in dev, set `WORKER_INTERVAL_MS`). Private and loopback addresses are blocked on purpose (see the note below).
 8. **Settings → Team**: invite a colleague as Viewer. The invitation email (with the link) appears in Mailpit. Open it in a private window, create the account, and check that a Viewer cannot change anything. Remove them again and their access ends immediately.
 9. **Settings → API key**: regenerate it (old install commands stop working; connected servers keep running). Try the theme toggle (sun/moon icon), shrink the window to phone width for the menu button, and sign out from the avatar menu.
+
+**Platform admin (YuktiOps staff).** Create a staff user with `npm run admin:create -- you@example.com` (prints a one-time random password; add `--password <pw>` to choose one, or run it on an existing account to promote it). Sign in and open **http://localhost:5173/admin** (also linked from the avatar menu): overview, organizations (change plan, suspend, reactivate), users and the audit log. Remove the flag with `npm run admin:revoke -- you@example.com`.
 
 > Monitoring `localhost` from the website monitor is refused (SSRF protection). To try it locally, start the API with `E2E_ALLOW_LOOPBACK=1` (never honoured in production).
 
@@ -123,6 +128,7 @@ Set `APP_URL=http://localhost:4000` in `.env` first. If port 4000 is busy: `$env
 | `npm run worker`              | Only the background worker (checks, alerts, email, cleanup) |
 | `npm run db:migrate`          | Apply database migrations                                   |
 | `npm run db:seed`             | Insert/update plan definitions (also runs at API start)     |
+| `npm run admin:create -- <email>` / `admin:revoke -- <email>` | Grant / remove platform admin (`/admin`) |
 | `npm run agent`               | Start the saved development agent                           |
 | `npm run site:dev`            | Marketing site with live reload                             |
 | `npm run format`              | Prettier on the code                                        |

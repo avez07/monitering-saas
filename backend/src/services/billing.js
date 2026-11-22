@@ -3,6 +3,7 @@ import { planLimit } from './limits.js';
 import { sendMail } from './mail.js';
 import { computeGst } from './billing-tax.js';
 import { getProviders } from './billing-providers/index.js';
+import { onPlanChanged } from './agent-config.js';
 
 export const GRACE_DAYS = 7;
 const DAY = 86400000;
@@ -39,6 +40,19 @@ export const billingProvider = {
     });
   },
 };
+
+/**
+ * After a committed plan change: agents follow the new plan's features (Prometheus collector on or off).
+ * Never fails the billing operation; the prom write endpoint also refuses unentitled orgs.
+ */
+export async function planChanged(db, orgId) {
+  if (!orgId) return;
+  try {
+    await onPlanChanged(db, orgId);
+  } catch (error) {
+    console.error(`[billing] agent settings update after plan change failed for ${orgId}: ${error.message}`);
+  }
+}
 
 // ---------------------------------------------------------------- limit checks
 
@@ -308,6 +322,8 @@ export async function processProviderEvent(db, event) {
       if (await tx.find('webhookEvent', { provider: event.provider, eventId: event.eventId }))
         return { duplicate: true };
       const { orgId } = await applyEvent(tx, db, event, after);
+      // Any subscription event may change the plan or its validity; agents re-check their features.
+      if (orgId && event.type !== 'refund.created') after.push(() => planChanged(db, orgId));
       await tx.create('webhookEvent', {
         id: key,
         orgId,
@@ -344,6 +360,7 @@ export async function runDunning(db, now = new Date()) {
       );
     await db.transaction((tx) => downgradeToFree(tx, row));
     downgraded++;
+    await planChanged(db, row.orgId);
     await mailOwner(db, row.orgId, 'Your YuktiOps account moved to the Free plan', [
       `We could not collect payment for ${GRACE_DAYS} days, so your account is now on the Free plan.`,
       'Your data is kept. You can upgrade again any time from Plan & billing.',

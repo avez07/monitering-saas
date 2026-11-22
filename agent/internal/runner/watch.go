@@ -23,6 +23,7 @@ type snapshot struct {
 func (r *runner) watchLoop(ctx context.Context) {
 	var dk *docker.Collector
 	svc := services.New()
+	svc.Creds = r.creds
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
