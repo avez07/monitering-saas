@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { assert } from '../lib/errors.js';
+import { assert, HttpError } from '../lib/errors.js';
 import { canEdit, audit } from '../services/auth.js';
 import { enforceCount, entitlements } from '../services/limits.js';
 import { resolveTarget } from '../services/uptime.js';
@@ -52,6 +52,24 @@ const createInput = z.object({ ...fields, type: z.enum(['http', 'keyword', 'api'
   .partial()
   .required({ name: true, type: true });
 const updateInput = z.object(fields).partial();
+
+/**
+ * A body that starts like JSON (or is sent as application/json) must parse. JSON has no comments, so
+ * a body with "// ..." lines is refused here instead of making the target answer 500 on every check.
+ */
+export function assertJsonBody(body, headers = {}) {
+  if (!body) return;
+  const type = Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] || '';
+  if (!/json/i.test(type) && !/^\s*[{[]/.test(body)) return;
+  try {
+    JSON.parse(body);
+  } catch (error) {
+    throw new HttpError(400, `The request body is not valid JSON (${error.message}). JSON cannot contain // comments or trailing commas.`, {
+      code: 'invalid_json_body',
+      hint: 'Remove comment lines and check commas and quotes, then save again.',
+    });
+  }
+}
 
 export function websiteRoutes(store, limits) {
   const router = Router();
@@ -176,7 +194,11 @@ export function websiteRoutes(store, limits) {
           Object.entries(input.headers).map(([k, v]) => [k, v === MASK ? (current.headers?.[k] ?? '') : v]),
         );
       }
-      if (input.body !== undefined) cols.body = input.body;
+      if (input.body !== undefined) {
+        cols.body = input.body;
+        const sent = { ...(current.headers || {}), ...(cols.headers || {}) };
+        assertJsonBody(input.body, sent);
+      }
       if (input.expectedStatus !== undefined) cols.expectedStatus = input.expectedStatus;
       if (input.jsonContains !== undefined) cols.jsonContains = input.jsonContains || null;
     }
@@ -277,7 +299,7 @@ export function websiteRoutes(store, limits) {
     let resource = await store.find('monitoredResource', { orgId: org(req), externalId: monitor.id });
     resource = await ensureResource(store, monitor, resource);
     await recordCheckResult(store, monitor, result, resource);
-    res.json({ ok: result.ok, statusCode: result.statusCode, latencyMs: result.latencyMs, error: result.error });
+    res.json({ ok: result.ok, statusCode: result.statusCode, latencyMs: result.latencyMs, error: result.error, detail: result.detail ?? null });
   });
 
   router.get('/websites/:id/checks', async (req, res) => {
@@ -324,6 +346,7 @@ export function websiteRoutes(store, limits) {
         statusCode: c.statusCode,
         latencyMs: c.latencyMs,
         error: c.error,
+        detail: c.detail,
       })),
     });
   });

@@ -217,6 +217,9 @@ If this is a container or a minimal system, run the agent as a Docker container 
     -e YUKTIOPS_API_KEY=<your API key> -v yuktiops-agent:/var/lib/yuktiops \
     ghcr.io/yuktiops/agent:latest
 
+(If Docker answers "denied", the image is not public yet: build it with
+ docker build -t yuktiops-agent:local -f agent/Dockerfile agent   and use yuktiops-agent:local.)
+
 (To install the files without starting a service, run this installer again with --no-start.)
 MSG
     exit 1

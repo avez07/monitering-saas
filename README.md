@@ -17,6 +17,18 @@ deploy/            Production compose, Caddy, backups, load test
 docs/              API notes, runbook, billing and ops guides
 ```
 
+## Run in development
+
+```
+npm run dev            # API + worker + dashboard in one stream
+npm run dev:backend    # or one per terminal: API
+npm run dev:worker     #                      background worker
+npm run dev:frontend   #                      dashboard
+npm run dev:terminals  # opens the three in separate terminals (scripts/dev-terminals.ps1 / .sh)
+```
+
+Agent image not public yet (`docker run` says `denied`)? Build it: `docker build -t yuktiops-agent:local -f agent/Dockerfile agent`. See [agent/README.md](agent/README.md).
+
 ## Status
 
 All build phases are in place: accounts and teams (owner, admin, viewer), the account API key and per-server credentials, the Go agent with a one-command installer, the dashboard (Overview, Servers with 1h/24h/7d/30d charts and a Connection page, Add-server wizard, Containers, Services, Websites and APIs, Alerts with templates and contacts, Settings), email verification and invites, billing (mock provider locally), and the marketing site. See [PLAN.md](PLAN.md) for the roadmap and [START.md](START.md) to run and test everything.

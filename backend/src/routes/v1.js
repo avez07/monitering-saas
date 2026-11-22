@@ -234,7 +234,8 @@ export function v1Routes(store, limits) {
     const now = Date.now();
     // No database work here: the report is validated, queued (gzipped) and answered. Workers store it.
     await enqueueIngest({ agent, input, now, first: agent.status === 'pending' });
-    res.status(202).json({ configVersion: setup.version, serverTime: new Date(now).toISOString() });
+    // `config` carries the profile id too: a different profile can have the same version number.
+    res.status(202).json({ configVersion: setup.version, config: configInfo(setup), serverTime: new Date(now).toISOString() });
   });
 
   router.use((req, res) => res.status(404).json({ error: 'Unknown agent endpoint.' }));

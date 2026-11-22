@@ -22,6 +22,7 @@ test('ingest answers 202 with the config version and stores rows only after the 
   const response = await ingestRaw(app, s.credential, payload([sample({ cpu: 61 })]));
   assert.equal(response.status, 202);
   assert.equal(response.body.configVersion, config.body.version, 'same number /v1/config reports');
+  assert.equal(response.body.config.id, config.body.id, 'the profile id is announced too, so a switched profile with the same version is noticed');
   assert.equal((await rows(s.agentId)).length, 0, 'nothing is written in the request path');
   assert.equal(await store.client.agent.count({ where: { id: s.agentId, status: 'healthy' } }), 0);
   assert.ok((await getRedis().zscore('lastseen', s.agentId)) > 0, 'last-seen is in the ZSET at once');

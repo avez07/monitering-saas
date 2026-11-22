@@ -18,7 +18,15 @@ export class PrismaStore {
    * It runs before and after the write so a cache refill that races the write cannot survive.
    */
   async #touch(table, { target = '*', revoked = [] } = {}) {
-    if (WATCHED.has(table)) await invalidateAgents(target, { revokedCredentialIds: revoked });
+    if (!WATCHED.has(table)) return;
+    try {
+      await invalidateAgents(target, { revokedCredentialIds: revoked });
+    } catch (error) {
+      // Redis trouble must not turn a successful database write into a 500; cached entries expire on their own
+      // (TTL). A credential revocation is the exception: it must reach every instance, so it still fails loudly.
+      if (revoked.length) throw error;
+      console.error('store: agent cache invalidation failed:', error.message);
+    }
   }
   /** Ids of credentials a write is about to revoke (so they can be blocked instantly everywhere). */
   async #revoking(table, where, data) {

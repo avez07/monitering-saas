@@ -10,6 +10,11 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev -w backend\" \"npm run worker:dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:worker": "npm run worker:dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:all": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev:backend\" \"npm run dev:worker\" \"npm run dev:frontend\"",
+    "dev:terminals": "node scripts/dev-terminals.mjs",
     "build": "npm run build -w frontend",
     "start": "npm run start -w backend",
     "test": "npm run test -w backend",

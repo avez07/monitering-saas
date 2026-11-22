@@ -41,6 +41,8 @@ order: 2.7
 
 ## Upgrade and uninstall
 
+If the pull says `denied`, the image is not public yet: `docker login ghcr.io`, or build it with `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` and use `yuktiops-agent:local` as the image.
+
 Upgrade: `docker pull ghcr.io/yuktiops/agent`, `docker rm -f yuktiops-agent`, run step 2 again. Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
 
 ## What happens on your server

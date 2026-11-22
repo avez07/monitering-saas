@@ -561,6 +561,8 @@ model UptimeCheck {
   latencyMs            Float
   certificateExpiresAt DateTime?
   error                String?
+  /// What the site answered on a failed check: status, Retry-After and a redacted body snippet.
+  detail               String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   monitor              UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)

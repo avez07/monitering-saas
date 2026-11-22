@@ -170,6 +170,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: GHCR creates a new package as PRIVATE. Once, by hand: Packages -> agent -> Package settings ->
+      # Change visibility -> Public. Until then `docker pull` answers "denied" (users can `docker login ghcr.io`
+      # or build agent/Dockerfile locally).
       - name: Push the multi-arch Docker image (ghcr.io/yuktiops/agent)
         uses: goreleaser/goreleaser-action@v6
         with:

@@ -62,7 +62,24 @@ Errors: 400 validation (missing url/host/port, bad url), 402 plan monitor limit,
 
 `DELETE /api/services/:id` (204): accepts a reported service uuid (removes its entry from the host's
 `collectors.services[]` and the reported row), a `cfg.` id (removes the config entry), or a monitor id (removes the
-monitor, same as `DELETE /api/websites/:id`). Unknown or other-org ids: 404.
+monitor, same as `DELETE /api/websites/:id`). Unknown or other-org ids: 404. Idempotent for reported rows: a row whose host
+is gone is still removed.
+
+### `PATCH /api/services/:id` (admin)
+
+Body: any subset of `{ name, url, host, port, address, unit, processName, intervalSeconds, failureThreshold }`
+(strict, at least one field; `type` cannot change). Fields that do not apply to the service are 400
+(`"<field> cannot be changed on a <kind> service."`).
+
+- Monitor ids (website/api/tcp): `name`, `url` (http/https) or `address`+`port` (tcp), `intervalSeconds` (>= plan minimum, else
+  402), `failureThreshold` (1-10). The target is re-resolved (blocked/private addresses are 400).
+- Agent entries (reported uuid or `cfg.` id): `name`, plus `unit` (systemd), `processName` (process), `port`/`address`
+  (port, mysql, postgres, redis; address is stored as the entry's `host`), `url` (nginx, apache). `host` may only repeat the
+  current host. Same bump/copy rules as POST.
+
+Response 200, same shape as POST: `{ id, status, source, type, kind, name, serverId, monitorId }`. For `source:"agent"` the
+returned `id` is the `cfg.` id of the edited entry and **changes when the name changes**. Errors: 400, 402, 403, 404, 409
+(duplicate kind+name on the host). Audit: `service.updated`.
 
 ## C.4 Rupee-first billing
 

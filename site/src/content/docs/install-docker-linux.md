@@ -53,7 +53,7 @@ You do not need to install anything on the host OS: run the container above, wit
 
 ## Something went wrong?
 
-- **`pull access denied`**: check the image name or run `docker login ghcr.io`.
+- **`denied` or `pull access denied`**: the image is not public yet (or you are not logged in). Either `docker login ghcr.io`, or build it from the repository and use the tag `yuktiops-agent:local` in the command above: `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` (same command in PowerShell and bash, run from the repo root).
 - **Container keeps restarting**: `docker logs yuktiops-agent`.
 - **Docker permission error in the dashboard**: see [Docker permission denied](/docs/troubleshooting-docker-permission).
 - **Numbers look like the container, not the host**: you left out `--pid host`, `--network host` or the `/host` mount.

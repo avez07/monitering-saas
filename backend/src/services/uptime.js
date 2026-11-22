@@ -100,60 +100,116 @@ export async function safeRequest(target, options = {}) {
     return { ...result, latencyMs: Math.round(performance.now() - started) };
   }
 }
-async function once(target, { method, headers, body, timeoutMs, maxBytes }) {
+
+
+async function once(
+  target,
+  { method, headers, body, timeoutMs, maxBytes = 10240 },
+) {
   const { url, address } = await resolveTarget(target, ['http:', 'https:']);
+
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? https : http;
+
     const request = transport.request(
       url,
       {
         method,
         timeout: timeoutMs,
         lookup: (host, opts, callback) =>
-          opts?.all ? callback(null, [address]) : callback(null, address.address, address.family),
+          opts?.all
+            ? callback(null, [address])
+            : callback(null, address.address, address.family),
         headers: {
           'user-agent': 'YuktiOpsUptime/1.0',
           ...headers,
-          ...(body != null ? { 'content-length': Buffer.byteLength(body) } : {}),
+          ...(body != null
+            ? { 'content-length': Buffer.byteLength(body) }
+            : {}),
         },
       },
       (response) => {
+        const chunks = [];
+        let size = 0;
+        let completed = false;
+        // console.log(body)
+
         const certificate = response.socket.getPeerCertificate?.();
+
         const certificateExpiresAt = certificate?.valid_to
           ? new Date(certificate.valid_to).toISOString()
           : null;
-        const done = (text) =>
+
+        const getBody = () => Buffer.concat(chunks).toString('utf8');
+
+        const done = () => {
+          if (completed) return;
+          completed = true;
+
+          const responseBody = getBody();
+console.log('headers:', headers);
           resolve({
             status: response.statusCode,
             headers: response.headers,
-            body: text,
+            body: responseBody,
             certificateExpiresAt,
           });
-        if (!maxBytes) {
-          response.destroy();
-          return done('');
-        }
-        const chunks = [];
-        let size = 0;
+        };
+
         response.on('data', (chunk) => {
-          chunks.push(chunk);
+          const remaining = Math.max(0, maxBytes - size);
+
+          if (remaining > 0) {
+            chunks.push(chunk.subarray(0, remaining));
+          }
+
           size += chunk.length;
-          if (size > maxBytes) response.destroy();
         });
-        response.on('close', () => done(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
-        response.on('error', () => done(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
+
+        response.on('end', done);
+
+        response.on('aborted', () => {
+          console.error('Response aborted');
+          done();
+        });
+
+        response.on('error', (error) => {
+          console.error('Response error:', error);
+          done();
+        });
+
+        response.on('close', done);
       },
     );
-    request.on('error', (error) => reject(Object.assign(new Error(codeOf(error)), { code: codeOf(error) })));
-    request.on('timeout', () => request.destroy(Object.assign(new Error('timeout'), { code: 'timeout' })));
+
+    request.on('error', (error) => {
+      console.error('Request error:', error);
+
+      reject(
+        Object.assign(new Error(codeOf(error)), {
+          code: codeOf(error),
+        }),
+      );
+    });
+
+    request.on('timeout', () => {
+      request.destroy(
+        Object.assign(new Error('timeout'), { code: 'timeout' }),
+      );
+    });
+
     request.end(body ?? undefined);
   });
 }
 
+
+
 /** Open a TCP connection to a vetted public address. Resolves with latency or rejects with a short code. */
 export async function tcpConnect(host, port, timeoutMs = 8000) {
   const started = performance.now();
-  const { address } = await resolveTarget(`tcp://${host.includes(':') ? `[${host}]` : host}:${port}`);
+  const { address } = await resolveTarget(
+    `tcp://${host.includes(':') ? `[${host}]` : host}:${port}`,
+  );
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: address.address, port, timeout: timeoutMs });
     socket.once('connect', () => {

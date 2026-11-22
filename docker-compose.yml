@@ -104,7 +104,28 @@ services:
       redis: { condition: service_healthy }
       api: { condition: service_healthy }
     restart: unless-stopped
+  # Local agent (docker compose --profile agent up -d --build). Builds agent/Dockerfile from source, so no
+  # ghcr.io pull is needed. Set YUKTIOPS_API_KEY (and optionally YUKTIOPS_API_URL) in .env or the shell.
+  agent:
+    profiles: [agent]
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    image: ${YUKTIOPS_AGENT_IMAGE:-yuktiops-agent:local}
+    container_name: yuktiops-agent
+    restart: unless-stopped
+    pid: host
+    network_mode: host
+    environment:
+      YUKTIOPS_API_KEY: ${YUKTIOPS_API_KEY:-}
+      YUKTIOPS_API_URL: ${YUKTIOPS_API_URL:-http://localhost:4000}
+      HOST_ROOT: /host
+    volumes:
+      - yuktiops-agent:/var/lib/yuktiops
+      - /:/host:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 volumes:
+  yuktiops-agent:
   yuktiops-postgres-data:
   yuktiops-redis-data:
   yuktiops-clickhouse-data:

@@ -16,8 +16,9 @@ export function serverRoutes(store) {
   const router = Router();
 
   router.get('/servers', async (req, res) => {
-    const q = z.object({ includeDockerHosts: z.enum(['true', 'false']).optional() }).parse(req.query);
-    res.json(await listServers(store, req.context.orgId, { includeDockerHosts: q.includeDockerHosts === 'true' }));
+    // Lenient on purpose: a stray or repeated value must never make the whole page fail.
+    const flag = [].concat(req.query.includeDockerHosts ?? []).map(String).at(-1);
+    res.json(await listServers(store, req.context.orgId, { includeDockerHosts: ['true', '1', 'yes'].includes(flag) }));
   });
   router.get('/servers/:id', async (req, res) => {
     const { agent, resource } = await requireServer(store, req.context.orgId, req.params.id);

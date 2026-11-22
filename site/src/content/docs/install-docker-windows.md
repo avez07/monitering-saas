@@ -55,7 +55,7 @@ Git Bash turned `/var/run/docker.sock` into `C:\Program Files\Git\var\run\docker
 
 - **Cannot connect to the Docker engine**: Docker Desktop is not running yet.
 - **Server shows up with a Linux hostname such as `docker-desktop`**: expected, that is the VM.
-- **`pull access denied`**: `docker login ghcr.io`.
+- **`denied` or `pull access denied`**: the image is not public yet (or you are not logged in). Either `docker login ghcr.io`, or build it from the repository and use the tag `yuktiops-agent:local` in the command above: `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` (same command in PowerShell and bash, run from the repo root).
 - **No data**: `docker logs yuktiops-agent`, then see [No data](/docs/troubleshooting-no-data).
 
 ## Upgrade and uninstall

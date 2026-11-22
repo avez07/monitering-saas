@@ -25,14 +25,14 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 export function serverSummary(agent, resource, settings, now = Date.now()) {
   const status = serverStatus(agent, settings, now);
-  const l = resource.labels || {};
+  const l = resource.labels && typeof resource.labels === 'object' && !Array.isArray(resource.labels) ? resource.labels : {};
   return {
     id: agent.id,
     resourceId: resource.id,
-    name: resource.name,
+    name: resource.name ?? agent.name ?? '',
     hostname: agent.name,
     kind: agent.kind || 'server',
-    os: agent.os || l.os || '',
+    os: agent.os || (typeof l.os === 'string' ? l.os : ''),
     arch: agent.arch,
     platform: agent.platform,
     agentVersion: agent.version,
@@ -69,12 +69,17 @@ export async function listServers(store, orgId, { includeDockerHosts = false } =
   const byId = new Map(configs.map((c) => [c.id, c]));
   const fallback = configs.find((c) => c.isDefault);
   const now = Date.now();
-  return (await liveServers(store, orgId))
-    .filter(({ agent }) => includeDockerHosts || (agent.kind || 'server') !== 'docker-host')
-    .map(({ agent, resource }) =>
-      serverSummary(agent, resource, (byId.get(agent.configId) || fallback)?.settings, now),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const rows = [];
+  for (const { agent, resource } of await liveServers(store, orgId)) {
+    if (!includeDockerHosts && (agent.kind || 'server') === 'docker-host') continue;
+    try {
+      rows.push(serverSummary(agent, resource, (byId.get(agent.configId) || fallback)?.settings, now));
+    } catch (error) {
+      // One malformed row must not take the whole page down.
+      console.error('servers: skipped unreadable server', agent.id, error.message);
+    }
+  }
+  return rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 const configView = async (store, agent) => {

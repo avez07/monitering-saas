@@ -71,7 +71,7 @@ Hints the page can show when nothing arrives: no key yet; key exists but `lastSe
 Same hash/show-once model as the install key (`ApiKey.kind = 'telemetry'`, prefix `yk_otel_`). Write-only: they can only send OTLP. Admin only. Up to 20 active keys per organization; create one per environment (name it `production`, `staging`...).
 
 - `GET /api/telemetry-keys` -> `{ "items": [ { "id", "name", "prefix", "createdAt", "lastUsedAt", "lastSeenAt" } ] }` (active keys only).
-- `POST /api/telemetry-keys` `{ "name": "production" }` -> `201 { id, name, prefix, createdAt, key: "yk_otel_..." }`. The raw `key` appears only in this response.
+- `POST /api/telemetry-keys` `{ "name": "production" }` -> `201 { id, name, prefix, createdAt, key: "yk_otel_..." }`. The raw `key` appears only in this response. (`lastUsedAt`/`lastSeenAt` are `null` for a new key; `lastSeenAt` is also `null` if Redis cannot be read, key creation never depends on it.)
 - `DELETE /api/telemetry-keys/:id` -> `200 { "revoked": true }`. Takes effect for OTLP within seconds on every API instance. `404` for an unknown or already revoked key.
 
 The existing `/api/api-key` endpoints keep managing only the single install key and never touch telemetry keys.

@@ -106,7 +106,7 @@ export const CATALOG = {
     'warning',
     "The agent isn't allowed to read Docker",
     'Container monitoring is on, but the agent user cannot open the Docker socket (/var/run/docker.sock).',
-    'Add the agent user to the docker group and restart the agent, or turn container monitoring off in the server settings.',
+    'Add the agent user to the docker group and restart the agent, or turn container monitoring off in the server settings. If the agent runs in a Docker container, start it with --group-add 0 (Docker Desktop on Windows or Mac) or --group-add $(stat -c "%g" /var/run/docker.sock) (Linux) next to the docker.sock mount.',
     ['sudo usermod -aG docker yuktiops', restart],
   ),
   disk_permission: entry(

@@ -39,7 +39,11 @@ export async function markSeen(keyId, signal, now = Date.now()) {
 }
 export async function readSeen(keyId) {
   const redis = getRedis();
-  const [seen, trace] = await Promise.all([redis.hgetall(`otel:seen:${keyId}`), redis.get(`otel:traceseen:${keyId}`)]);
+  // Last-seen info is a convenience: if Redis is unreachable the key list and key creation must still work.
+  const [seen, trace] = await Promise.all([redis.hgetall(`otel:seen:${keyId}`), redis.get(`otel:traceseen:${keyId}`)]).catch((error) => {
+    console.error('otel: could not read last-seen info:', error.message);
+    return [{}, null];
+  });
   return {
     lastSeenAt: seen.at ? new Date(Number(seen.at)).toISOString() : null,
     lastSignal: seen.signal ?? null,

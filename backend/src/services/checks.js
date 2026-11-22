@@ -1,6 +1,18 @@
 import { safeRequest, tcpConnect, errorCode } from './uptime.js';
+import { redact } from '../lib/errors.js';
 
 export const RETRY_DELAY_SECONDS = 30;
+const DETAIL_BYTES = 2048;
+const DETAIL_CHARS = 500;
+
+/** What the site answered, for the check log: status line, Retry-After and a redacted body snippet. */
+export function responseDetail(response) {
+  const body = redact((response.body || '').replace(/\s+/g, ' ').trim()).slice(0, DETAIL_CHARS);
+  const retry = response.headers?.['retry-after'];
+  return [`HTTP ${response.status}`, retry ? `Retry-After: ${redact(String(retry)).slice(0, 40)}` : null, body || '(empty body)']
+    .filter(Boolean)
+    .join(' · ');
+}
 
 /** Days from `now` until `date` (rounded down; negative when already past), or null. */
 export function daysLeft(date, now = Date.now()) {
@@ -24,6 +36,25 @@ export function hostOf(target) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Headers for an API check. A body that is valid JSON gets `Content-Type: application/json` unless the
+ * monitor sets its own (like PowerShell's -ContentType or curl --json), otherwise many servers cannot
+ * parse the body and answer 500 to a request that works from the command line.
+ */
+export function requestHeaders(monitor) {
+  const headers = { ...(monitor.headers || {}) };
+  const hasType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+  if (monitor.body && !hasType) {
+    try {
+      JSON.parse(monitor.body);
+      headers['content-type'] = 'application/json';
+    } catch {
+      /* not JSON: leave it to the user */
+    }
+  }
+  return headers;
 }
 
 function failureCode(error) {
@@ -50,10 +81,10 @@ export async function runCheck(monitor, deps = {}) {
     const readsBody = monitor.type === 'keyword' || (isApi && !!monitor.jsonContains);
     const response = await request(monitor.target, {
       method: isApi ? monitor.method : 'GET',
-      headers: isApi ? monitor.headers || {} : {},
+      headers: isApi ? requestHeaders(monitor) : {},
       body: isApi && monitor.body ? monitor.body : undefined,
       timeoutMs,
-      maxBytes: readsBody ? 256 * 1024 : 0,
+      maxBytes: readsBody ? 256 * 1024 : DETAIL_BYTES,
       maxRedirects: monitor.type === 'http' ? 0 : 3,
     });
     const status = response.status;
@@ -71,6 +102,7 @@ export async function runCheck(monitor, deps = {}) {
       error = 'json_missing';
     return {
       ok: !error,
+      detail: error ? responseDetail(response) : null,
       statusCode: status,
       latencyMs: response.latencyMs ?? Math.round(performance.now() - started),
       error,
@@ -82,6 +114,7 @@ export async function runCheck(monitor, deps = {}) {
       statusCode: 0,
       latencyMs: Math.round(performance.now() - started),
       error: failureCode(error),
+      detail: redact(error?.message || '').slice(0, DETAIL_CHARS) || null,
       certificateExpiresAt: null,
     };
   }
@@ -116,6 +149,7 @@ export async function recordCheckResult(store, monitor, result, resource, now = 
     latencyMs: result.latencyMs,
     certificateExpiresAt: result.certificateExpiresAt ? new Date(result.certificateExpiresAt) : null,
     error: result.error,
+    detail: result.ok ? null : (result.detail ?? null),
     createdAt: at,
   });
   await store.update('uptimeMonitor', monitor.id, {

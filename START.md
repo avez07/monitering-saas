@@ -33,7 +33,17 @@ npm run db:migrate
 npm run dev          # API + background worker + dashboard, all with live reload
 ```
 
-Open **http://localhost:5173**. Stop with **Ctrl+C**. If a port is busy, set `PORT` / `FRONTEND_PORT` in `.env` (and keep `APP_URL`, `API_PUBLIC_URL` consistent).
+Open **http://localhost:5173**. Stop with **Ctrl+C**.
+
+**Separate terminals (Backend, Worker, Frontend each in its own window):** run one command per terminal, from the repo root:
+
+```powershell
+npm run dev:backend    # terminal 1: API on :4000
+npm run dev:worker     # terminal 2: background worker (checks, alerts, email)
+npm run dev:frontend   # terminal 3: dashboard on :5173
+```
+
+Or open all three at once: `npm run dev:terminals` (Windows: `scripts/dev-terminals.ps1`, uses Windows Terminal tabs if `wt` exists; Linux/macOS: `scripts/dev-terminals.sh`, uses tmux or a terminal window each). `npm run dev:all` is the combined single-stream alias of `npm run dev`. If a port is busy, set `PORT` / `FRONTEND_PORT` in `.env` (and keep `APP_URL`, `API_PUBLIC_URL` consistent).
 
 ## 3. Try it as a brand-new customer
 
@@ -76,7 +86,7 @@ curl -fsSL http://localhost:4000/downloads/install.sh | sudo bash -s -- \
 
 (`http://` is accepted only for `localhost`.) Check it with `yuktiops-agent status` and `sudo yuktiops-agent doctor`; remove it with `sudo yuktiops-agent uninstall`.
 
-**Docker option:** `docker run -d --name yuktiops-agent -e YUKTIOPS_API_KEY=yk_live_<your-key> -e YUKTIOPS_API_URL=http://host.docker.internal:4000 -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent` (the wizard's **Docker** tab shows the exact command, including the local `--api`).
+**Docker option:** `docker run -d --name yuktiops-agent -e YUKTIOPS_API_KEY=yk_live_<your-key> -e YUKTIOPS_API_URL=http://host.docker.internal:4000 -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent`. If you get `denied`, the image is not public yet: build it locally with `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` and use `yuktiops-agent:local` as the image (or `YUKTIOPS_API_KEY=yk_live_<your-key> docker compose --profile agent up -d --build`) (the wizard's **Docker** tab shows the exact command, including the local `--api`).
 
 The free plan allows 2 servers; a third registration is refused with a message to upgrade.
 
@@ -108,6 +118,8 @@ Set `APP_URL=http://localhost:4000` in `.env` first. If port 4000 is busy: `$env
 | Command                       | What it does                                                |
 | ----------------------------- | ----------------------------------------------------------- |
 | `npm run dev`                 | API, worker and dashboard with live reload                  |
+| `npm run dev:backend` / `dev:worker` / `dev:frontend` | One service per terminal              |
+| `npm run dev:terminals`       | Opens the three above in separate terminals                 |
 | `npm run worker`              | Only the background worker (checks, alerts, email, cleanup) |
 | `npm run db:migrate`          | Apply database migrations                                   |
 | `npm run db:seed`             | Insert/update plan definitions (also runs at API start)     |
