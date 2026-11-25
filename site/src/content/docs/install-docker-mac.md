@@ -20,7 +20,7 @@ order: 2.7
      -v yuktiops-agent:/var/lib/yuktiops \
      -v /var/run/docker.sock:/var/run/docker.sock:ro \
      -e YUKTIOPS_API_KEY=yk_live_... \
-     ghcr.io/yuktiops/agent
+     yuktiops/yuktiops-agent
    ```
 
    What it does: runs the agent in the background and gives it a read-only view of the VM. The `docker.sock` line enables container stats; remove it if you do not want that.
@@ -43,7 +43,7 @@ order: 2.7
 
 If the pull says `denied`, the image is not public yet: `docker login ghcr.io`, or build it with `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` and use `yuktiops-agent:local` as the image.
 
-Upgrade: `docker pull ghcr.io/yuktiops/agent`, `docker rm -f yuktiops-agent`, run step 2 again. Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
+Upgrade: `docker pull yuktiops/yuktiops-agent`, `docker rm -f yuktiops-agent`, run step 2 again. Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
 
 ## What happens on your server
 

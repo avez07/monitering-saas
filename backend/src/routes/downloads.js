@@ -13,7 +13,7 @@ const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,150}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const LOOPBACK = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/;
 
-export const DOCKER_IMAGE = 'ghcr.io/yuktiops/agent';
+export const DOCKER_IMAGE = 'yuktiops/yuktiops-agent';
 
 const MIME = {
   '.tar.gz': 'application/gzip',

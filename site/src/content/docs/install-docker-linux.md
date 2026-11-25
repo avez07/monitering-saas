@@ -19,7 +19,7 @@ Run the agent as a container. With the options below it sees the real host, not 
      -v /:/host:ro -e HOST_ROOT=/host \
      -v yuktiops-agent:/var/lib/yuktiops \
      -e YUKTIOPS_API_KEY=yk_live_... \
-     ghcr.io/yuktiops/agent
+     yuktiops/yuktiops-agent
    ```
 
    What each part does:
@@ -60,7 +60,7 @@ You do not need to install anything on the host OS: run the container above, wit
 
 ## Upgrade and uninstall
 
-Upgrade: `docker pull ghcr.io/yuktiops/agent`, then `docker rm -f yuktiops-agent` and run step 2 again (the volume keeps your credential). Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
+Upgrade: `docker pull yuktiops/yuktiops-agent`, then `docker rm -f yuktiops-agent` and run step 2 again (the volume keeps your credential). Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
 
 ## What happens on your server
 

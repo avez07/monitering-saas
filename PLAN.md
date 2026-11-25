@@ -49,7 +49,7 @@ A single **static Go binary**, `yuktiops-agent`, with no dependencies: no Node, 
 - **Build tool:** **GoReleaser**, run by **GitHub Actions** when a tag like `agent/v0.4.1` is pushed.
   - Go cross-compiles from one Linux runner: `CGO_ENABLED=0 GOOS=linux GOARCH=amd64|arm64|arm(v7)`, with `-trimpath -ldflags "-s -w -X main.version=…"`. That's about 10 MB per binary.
   - **Launch targets:** Linux **x86-64 (amd64)**, Linux **ARM64** (AWS Graviton, Hetzner/Oracle ARM, Raspberry Pi 4/5) and Linux **ARMv7** (older Pis, cheap boards).
-  - **Packages per target:** `.tar.gz`, `.deb` (Ubuntu/Debian), `.rpm` (RHEL/Rocky/Alma/CentOS/Amazon Linux, built with nfpm) and a multi-arch **Docker image** (`ghcr.io/yuktiops/agent`).
+  - **Packages per target:** `.tar.gz`, `.deb` (Ubuntu/Debian), `.rpm` (RHEL/Rocky/Alma/CentOS/Amazon Linux, built with nfpm) and a multi-arch **Docker image** (`yuktiops/yuktiops-agent`).
   - `checksums.txt` (SHA-256 of every file) plus a **cosign signature** of it.
 - **Release pipeline:** test → build → upload files → smoke-test `install.sh` on a fresh Ubuntu runner (it has systemd) → **only then** update `latest.json`. A broken build therefore never becomes "latest".
 - **Windows and macOS:** Go builds them easily, but the service install and some collectors differ. They're a later phase; the wizard shows them as "Coming soon".

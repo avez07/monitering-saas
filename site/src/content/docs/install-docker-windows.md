@@ -20,7 +20,7 @@ order: 2.6
      -v yuktiops-agent:/var/lib/yuktiops `
      -v /var/run/docker.sock:/var/run/docker.sock:ro `
      -e YUKTIOPS_API_KEY=yk_live_... `
-     ghcr.io/yuktiops/agent
+     yuktiops/yuktiops-agent
    ```
 
    What it does: starts the agent in the background, gives it a read-only view of the VM (`/host`), and, with the `docker.sock` line, lets it read container stats. Leave that line out if you do not want containers monitored.
@@ -44,7 +44,7 @@ MSYS_NO_PATHCONV=1 docker run -d --name yuktiops-agent --restart unless-stopped 
   -v yuktiops-agent:/var/lib/yuktiops \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e YUKTIOPS_API_KEY=yk_live_... \
-  ghcr.io/yuktiops/agent
+  yuktiops/yuktiops-agent
 ```
 
 ### The error "mkdir C:\Program Files\Git\var: Access is denied"
@@ -60,7 +60,7 @@ Git Bash turned `/var/run/docker.sock` into `C:\Program Files\Git\var\run\docker
 
 ## Upgrade and uninstall
 
-Upgrade: `docker pull ghcr.io/yuktiops/agent`, `docker rm -f yuktiops-agent`, run the command again. Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
+Upgrade: `docker pull yuktiops/yuktiops-agent`, `docker rm -f yuktiops-agent`, run the command again. Uninstall: `docker rm -f yuktiops-agent` and `docker volume rm yuktiops-agent`, then remove the server in the dashboard.
 
 ## What happens on your server
 

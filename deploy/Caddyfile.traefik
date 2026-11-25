@@ -1,0 +1,24 @@
+# YuktiOps edge when another proxy (Traefik) already owns ports 80/443 and only passes the yuktiops
+# hostnames through at TCP level (SNI passthrough, no TLS termination). See docs/deploy-behind-traefik.md.
+#
+# - Caddy still terminates TLS and gets its own Let's Encrypt certificates. Port 80 is not reachable
+#   from the internet in this setup, so only the TLS-ALPN-01 challenge (over 443) is used.
+# - Traefik sends a PROXY protocol v2 header so Caddy and the API see the real client IP.
+#   Only peers inside the shared Traefik network may send that header (PROXY_ALLOW).
+{
+	email {$ACME_EMAIL}
+	cert_issuer acme {
+		disable_http_challenge
+	}
+	servers {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow {$PROXY_ALLOW}
+			}
+			tls
+		}
+	}
+}
+
+import sites.caddy

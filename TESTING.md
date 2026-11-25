@@ -54,7 +54,7 @@ Get an API key from **Add your first server â†’ Create API key** (or Settings â†
 
 ```powershell
 # 1. Reproduce the original problem (expected: denied, unless the image is now public)
-docker pull ghcr.io/yuktiops/agent:latest
+docker pull yuktiops/yuktiops-agent:latest
 
 # 2. Build the agent image locally
 docker build -t yuktiops-agent:local -f agent/Dockerfile agent

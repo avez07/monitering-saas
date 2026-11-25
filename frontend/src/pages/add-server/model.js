@@ -139,7 +139,7 @@ export const DOCKER_DESKTOP_NOTE =
 
 const isLocalApi = (apiUrl) => !!apiUrl && /localhost|127\.0\.0\.1/.test(apiUrl);
 // Override at build time with VITE_YUKTIOPS_AGENT_IMAGE (for example yuktiops-agent:local).
-export const AGENT_IMAGE_DEFAULT = 'ghcr.io/yuktiops/agent:latest';
+export const AGENT_IMAGE_DEFAULT = 'yuktiops/yuktiops-agent:latest';
 const imageOf = (release) =>
   import.meta.env?.VITE_YUKTIOPS_AGENT_IMAGE ||
   (release?.docker ? `${release.docker.image}:${release.docker.tag}` : AGENT_IMAGE_DEFAULT);
@@ -152,7 +152,7 @@ export const DOCKER_DENIED_HELP = {
   powershell: 'docker build -t yuktiops-agent:local -f agent/Dockerfile agent',
   bash: 'docker build -t yuktiops-agent:local -f agent/Dockerfile agent',
   image: 'yuktiops-agent:local',
-  login: 'docker login ghcr.io',
+  login: 'docker login',
 };
 
 /**

@@ -91,7 +91,7 @@ curl -fsSL http://localhost:4000/downloads/install.sh | sudo bash -s -- \
 
 (`http://` is accepted only for `localhost`.) Check it with `yuktiops-agent status` and `sudo yuktiops-agent doctor`; remove it with `sudo yuktiops-agent uninstall`.
 
-**Docker option:** `docker run -d --name yuktiops-agent -e YUKTIOPS_API_KEY=yk_live_<your-key> -e YUKTIOPS_API_URL=http://host.docker.internal:4000 -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent`. If you get `denied`, the image is not public yet: build it locally with `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` and use `yuktiops-agent:local` as the image (or `YUKTIOPS_API_KEY=yk_live_<your-key> docker compose --profile agent up -d --build`) (the wizard's **Docker** tab shows the exact command, including the local `--api`).
+**Docker option:** `docker run -d --name yuktiops-agent -e YUKTIOPS_API_KEY=yk_live_<your-key> -e YUKTIOPS_API_URL=http://host.docker.internal:4000 -v yuktiops-agent:/var/lib/yuktiops yuktiops/yuktiops-agent`. If you get `denied`, the image is not public yet: build it locally with `docker build -t yuktiops-agent:local -f agent/Dockerfile agent` and use `yuktiops-agent:local` as the image (or `YUKTIOPS_API_KEY=yk_live_<your-key> docker compose --profile agent up -d --build`) (the wizard's **Docker** tab shows the exact command, including the local `--api`).
 
 The free plan allows 2 servers; a third registration is refused with a message to upgrade.
 

@@ -30,10 +30,23 @@ RUN npm ci -w frontend --ignore-scripts
 COPY frontend frontend
 RUN npm run build -w frontend
 
+# ---- docs / marketing site build (Astro) -----------------------------------------------------------
+FROM node:${NODE_VERSION}-bookworm-slim AS site-build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY site/package.json site/package.json
+COPY frontend/package.json frontend/package.json
+COPY backend/package.json backend/package.json
+RUN npm ci -w site --ignore-scripts
+COPY site site
+RUN npm run build -w site
+
 # ---- web: Caddy + static frontend -------------------------------------------------------------------
 FROM caddy:2-alpine AS web
-COPY deploy/Caddyfile /etc/caddy/Caddyfile
+# Caddyfile = direct edge (80/443); Caddyfile.traefik = behind a TCP-passthrough proxy. Both import sites.caddy.
+COPY deploy/Caddyfile deploy/Caddyfile.traefik deploy/sites.caddy /etc/caddy/
 COPY --from=frontend-build /app/frontend/dist /srv/app
+COPY --from=site-build /app/site/dist /srv/docs
 EXPOSE 80 443
 
 # ---- API / worker runtime ---------------------------------------------------------------------------

@@ -58,6 +58,8 @@ services:
       APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
       OTLP_DOMAIN: ${OTLP_DOMAIN:-otlp.invalid}
+      DOCS_DOMAIN: ${DOCS_DOMAIN:-docs.invalid}
+      PROXY_ALLOW: ${PROXY_ALLOW:-172.29.0.0/24}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
     ports:
       - '80:80'

@@ -118,7 +118,7 @@ test('GET /api/agent/releases lists packages for every OS/arch, publicly and cac
   assert.equal(deb.url, `http://localhost:4000/downloads/v${VERSION}/yuktiops-agent_${VERSION}_amd64.deb`);
   assert.equal(deb.sha256, SHA);
   assert.equal(deb.os, 'linux');
-  assert.equal(body.docker.image, 'ghcr.io/yuktiops/agent');
+  assert.equal(body.docker.image, 'yuktiops/yuktiops-agent');
   assert.match(body.install.commandTemplate, /--base-url=http:\/\/localhost:4000\/downloads/);
   assert.match(body.install.commandTemplate, /--key=<API_KEY>/);
   assert.equal(body.checksumsUrl, `http://localhost:4000/downloads/v${VERSION}/checksums.txt`);

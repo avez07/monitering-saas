@@ -1,4 +1,4 @@
-# Local build of the agent from source (no registry needed). Use this while ghcr.io/yuktiops/agent is not public.
+# Local build of the agent from source (no registry needed). Use this to build without pulling from Docker Hub.
 #
 #   docker build -t yuktiops-agent:local -f agent/Dockerfile agent
 #

@@ -1,0 +1,16 @@
+# Override for a server where Traefik already owns 80/443. Caddy publishes no host ports; Traefik reaches it
+# over the shared Docker network and forwards the yuktiops hostnames as raw TCP (SNI passthrough).
+#   docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env.production up -d
+# Needs Docker Compose 2.24+ (the !reset tag). Steps: docs/deploy-behind-traefik.md
+services:
+  web:
+    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile.traefik', '--adapter', 'caddyfile']
+    ports: !reset []
+    networks:
+      - edge
+      - traefik
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

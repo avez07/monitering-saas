@@ -65,7 +65,7 @@ docker run -d --name yuktiops-agent --restart unless-stopped \
   --pid host --network host -v /:/host:ro -e HOST_ROOT=/host \
   -e YUKTIOPS_API_KEY=yk_live_... \
   -v yuktiops-agent:/var/lib/yuktiops \
-  ghcr.io/yuktiops/agent
+  yuktiops/yuktiops-agent
 ```
 
 The container registers itself the first time it starts, and the options above let it report the host's numbers. Add `-v /var/run/docker.sock:/var/run/docker.sock:ro` for container monitoring. Full steps: [Docker on Linux](/docs/install-docker-linux).

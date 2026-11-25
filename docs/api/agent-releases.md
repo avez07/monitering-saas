@@ -41,9 +41,9 @@ Where `latest.json` comes from:
   "checksumsUrl": "https://downloads.yuktiops.com/agent/v0.4.1/checksums.txt",
   "signatureUrl": "https://downloads.yuktiops.com/agent/v0.4.1/checksums.txt.sig",
   "docker": {
-    "image": "ghcr.io/yuktiops/agent",
+    "image": "yuktiops/yuktiops-agent",
     "tag": "0.4.1",
-    "run": "docker run -d --name yuktiops-agent --restart unless-stopped -e YUKTIOPS_API_KEY=<API_KEY> -v yuktiops-agent:/var/lib/yuktiops ghcr.io/yuktiops/agent:0.4.1"
+    "run": "docker run -d --name yuktiops-agent --restart unless-stopped -e YUKTIOPS_API_KEY=<API_KEY> -v yuktiops-agent:/var/lib/yuktiops yuktiops/yuktiops-agent:0.4.1"
   }
 }
 ```
