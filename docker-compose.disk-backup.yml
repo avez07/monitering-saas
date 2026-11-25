@@ -1,0 +1,20 @@
+# Store pgBackRest backups and WAL on a mounted disk instead of Cloudflare R2.
+#   docker compose -f docker-compose.prod.yml [-f docker-compose.traefik.yml] -f docker-compose.disk-backup.yml \
+#     --env-file .env.production up -d
+# Setup (once, on the host):
+#   sudo mkdir -p /mnt/backup/yuktiops && sudo chown 70:70 /mnt/backup/yuktiops && sudo chmod 700 /mnt/backup/yuktiops
+# then set BACKUP_DIR=/mnt/backup/yuktiops and BACKUP_REPO_TYPE=posix in .env.production.
+# Use a DIFFERENT physical disk than the database volume, or a disk you copy off the server regularly
+# (rsync/restic): a backup on the same disk does not survive that disk dying.
+# Needs Docker Compose 2.24+ (the !reset tag).
+services:
+  db:
+    environment:
+      PGBACKREST_REPO1_TYPE: posix
+      # pgBackRest rejects empty S3 variables, so remove them entirely in disk mode.
+      PGBACKREST_REPO1_S3_ENDPOINT: !reset null
+      PGBACKREST_REPO1_S3_BUCKET: !reset null
+      PGBACKREST_REPO1_S3_KEY: !reset null
+      PGBACKREST_REPO1_S3_KEY_SECRET: !reset null
+    volumes:
+      - ${BACKUP_DIR:?set BACKUP_DIR (a directory on the backup disk)}:/yuktiops

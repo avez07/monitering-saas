@@ -44,18 +44,27 @@ docker volume rm "$volume" >/dev/null 2>&1 || true
 docker volume create "$volume" >/dev/null
 
 # Same repository settings as production, read from the env file (used read-only).
+repo_type=$(env_value BACKUP_REPO_TYPE)
 {
-  echo "PGBACKREST_REPO1_TYPE=$(env_value BACKUP_REPO_TYPE)"
-  echo "PGBACKREST_REPO1_S3_ENDPOINT=$(env_value R2_ENDPOINT)"
-  echo "PGBACKREST_REPO1_S3_BUCKET=$(env_value R2_BUCKET)"
-  echo "PGBACKREST_REPO1_S3_REGION=auto"
-  echo "PGBACKREST_REPO1_S3_KEY=$(env_value R2_ACCESS_KEY_ID)"
-  echo "PGBACKREST_REPO1_S3_KEY_SECRET=$(env_value R2_SECRET_ACCESS_KEY)"
+  echo "PGBACKREST_REPO1_TYPE=${repo_type:-s3}"
+  if [ "${repo_type:-s3}" = s3 ]; then
+    echo "PGBACKREST_REPO1_S3_ENDPOINT=$(env_value R2_ENDPOINT)"
+    echo "PGBACKREST_REPO1_S3_BUCKET=$(env_value R2_BUCKET)"
+    echo "PGBACKREST_REPO1_S3_REGION=auto"
+    echo "PGBACKREST_REPO1_S3_KEY=$(env_value R2_ACCESS_KEY_ID)"
+    echo "PGBACKREST_REPO1_S3_KEY_SECRET=$(env_value R2_SECRET_ACCESS_KEY)"
+  fi
   echo "PGBACKREST_REPO1_CIPHER_PASS=$(env_value PGBACKREST_CIPHER_PASS)"
 } >"$envfile"
 # DRILL_DOCKER_ARGS lets tests mount a local posix repository, e.g. "-v repo:/repo -e PGBACKREST_REPO1_PATH=/repo".
 # shellcheck disable=SC2206
 extra=(${DRILL_DOCKER_ARGS:-})
+# Disk repository: mount the backup directory read-only so the drill can never change production backups.
+if [ "${repo_type:-s3}" = posix ]; then
+  backup_dir=$(env_value BACKUP_DIR)
+  [ -n "$backup_dir" ] || die "BACKUP_DIR is not set in $ENV_FILE"
+  extra+=(-v "$backup_dir:/yuktiops:ro")
+fi
 
 if [ -n "$target" ]; then
   restore_args=(--stanza="$STANZA" --delta --type=time "--target=$target" --target-action=promote restore)

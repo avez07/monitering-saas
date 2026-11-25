@@ -10,7 +10,9 @@ STANZA=yuktiops
 # release.env (written by deploy.sh/rollback.sh) pins APP_TAG so a plain "up -d" never moves to :latest.
 dc() {
   local args=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
-  [ -n "${COMPOSE_OVERRIDE:-}" ] && args+=(-f "$COMPOSE_OVERRIDE") # tests only
+  # Extra compose files, space separated: COMPOSE_OVERRIDE="docker-compose.traefik.yml docker-compose.disk-backup.yml"
+  local f
+  for f in ${COMPOSE_OVERRIDE:-}; do args+=(-f "$f"); done
   [ -f "$STATE_DIR/release.env" ] && args+=(--env-file "$STATE_DIR/release.env")
   docker compose "${args[@]}" "$@"
 }

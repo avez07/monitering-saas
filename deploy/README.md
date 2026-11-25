@@ -172,7 +172,20 @@ lets you restore **to any second**, not just to the last night's backup. This is
 | First Saturday of the month | Restore drill |
 | Every 6 hours | Redis snapshot |
 
-### Example: first-time setup
+### Backups on a disk instead of R2
+No R2 bucket yet? Store the repository on a mounted disk. It is still encrypted and still supports point-in-time recovery.
+```bash
+sudo mkdir -p /mnt/backup/yuktiops && sudo chown 70:70 /mnt/backup/yuktiops && sudo chmod 700 /mnt/backup/yuktiops
+# .env.production:  BACKUP_REPO_TYPE=posix   BACKUP_DIR=/mnt/backup/yuktiops   PGBACKREST_CIPHER_PASS=<openssl rand -hex 32>
+export COMPOSE_OVERRIDE="docker-compose.traefik.yml docker-compose.disk-backup.yml"   # add to ~/.bashrc too
+docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml -f docker-compose.disk-backup.yml --env-file .env.production up -d db
+deploy/backup/setup.sh
+```
+`70` is the `postgres` user inside the db image. Use a different physical disk than the database, or copy the
+directory off the server regularly (`rsync`), because a backup on the same disk does not survive that disk dying.
+`redis-snapshot.sh` needs R2 and is skipped in this mode (Redis data is rebuildable).
+
+### Example: first-time setup (R2)
 ```bash
 # 1. fill R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, PGBACKREST_CIPHER_PASS
 #    in .env.production. Keep the cipher pass in a password manager: without it backups are unreadable.
