@@ -1,0 +1,76 @@
+# Override for a small server (about 4 GB RAM, 2 CPUs) that also runs other containers. For testing and light
+# load, not for a large fleet. Requires swap on the host (see deploy/README.md, "Small servers").
+# Add it LAST, with the other overrides, and set API_REPLICAS=1 in .env.production.
+services:
+  web:
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 128M } }
+
+  api:
+    environment: &small-node
+      NODE_OPTIONS: --max-old-space-size=256
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 384M } }
+
+  worker-ingest: &small-worker
+    environment: *small-node
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 320M } }
+  worker-checks: *small-worker
+  worker-alerts: *small-worker
+  worker-notify: *small-worker
+  worker-housekeeping: *small-worker
+  worker-otel: *small-worker
+
+  pgbouncer:
+    deploy:
+      resources: { limits: { cpus: '0.25', memory: 64M } }
+
+  redis:
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 192M } }
+
+  clickhouse:
+    volumes:
+      - ./deploy/clickhouse-small.xml:/etc/clickhouse-server/config.d/yuktiops-small.xml:ro
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 768M } }
+
+  victoriametrics:
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 384M } }
+
+  db:
+    # "command" replaces the whole list, so the base settings are repeated with smaller memory values.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=yuktiops archive-push %p
+      - -c
+      - archive_timeout=60
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - timescaledb.max_background_workers=4
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_checkpoints=on
+      - -c
+      - password_encryption=scram-sha-256
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 640M } }

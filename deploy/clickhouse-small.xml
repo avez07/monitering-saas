@@ -1,0 +1,11 @@
+<!-- ClickHouse settings for small servers (docker-compose.small.yml): smaller caches, fewer self-monitoring logs. -->
+<clickhouse>
+    <mark_cache_size>67108864</mark_cache_size>
+    <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+    <max_concurrent_queries>20</max_concurrent_queries>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <processors_profile_log remove="1"/>
+</clickhouse>

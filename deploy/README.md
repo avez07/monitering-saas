@@ -95,6 +95,15 @@ health check passes), `roll_to` (restart everything on a tag, one service at a t
 `record_release` (writes the current and previous tags into `.deploy/`). `.deploy/release.env` pins
 `APP_TAG`, so a later plain `docker compose up -d` can never silently jump to `:latest`.
 
+### Small servers (about 4 GB RAM)
+Add swap first, then run with `docker-compose.small.yml` as the last override and `API_REPLICAS=1`:
+```bash
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+export COMPOSE_OVERRIDE="docker-compose.traefik.yml docker-compose.disk-backup.yml docker-compose.small.yml"
+```
+Suitable for testing and light load. Use 8 GB or more for real customer traffic.
+
 ---
 
 ## 2. `Caddyfile`, `Caddyfile.traefik` and `sites.caddy`: the gateway
