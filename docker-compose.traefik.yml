@@ -2,6 +2,9 @@
 # over the shared Docker network and forwards the yuktiops hostnames as raw TCP (SNI passthrough).
 #   docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env.production up -d
 # Needs Docker Compose 2.24+ (the !reset tag). Steps: docs/deploy-behind-traefik.md
+#
+# The route is declared with Docker labels, so Traefik's own files are not touched. This needs Traefik's
+# Docker provider (--providers.docker=true) on the same network as TRAEFIK_NETWORK.
 services:
   web:
     command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile.traefik', '--adapter', 'caddyfile']
@@ -9,6 +12,15 @@ services:
     networks:
       - edge
       - traefik
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.tcp.routers.yuktiops.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.tcp.routers.yuktiops.rule: HostSNI(`${APP_DOMAIN}`) || HostSNI(`${API_DOMAIN}`) || HostSNI(`${DOCS_DOMAIN}`) || HostSNI(`${OTLP_DOMAIN:-otlp.invalid}`)
+      traefik.tcp.routers.yuktiops.tls.passthrough: 'true'
+      traefik.tcp.routers.yuktiops.service: yuktiops
+      traefik.tcp.services.yuktiops.loadbalancer.server.port: '443'
+      traefik.tcp.services.yuktiops.loadbalancer.proxyprotocol.version: '2'
 
 networks:
   traefik:

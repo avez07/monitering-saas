@@ -21,29 +21,15 @@ docker network inspect traefik -f '{{(index .IPAM.Config 0).Subnet}}'
 ```
 Put the name in `TRAEFIK_NETWORK` and the subnet in `PROXY_ALLOW` in `.env.production`.
 
-## 3. Traefik: one TCP router (file provider)
-Traefik needs a TCP entrypoint on 443 that is not already bound to HTTP-only routers, or add this alongside them.
-HTTP routers for your other domain keep working: Traefik picks the router by SNI.
-```yaml
-# /etc/traefik/dynamic/yuktiops.yml
-tcp:
-  routers:
-    yuktiops:
-      entryPoints: [websecure]
-      rule: HostSNI(`app.yuktiops.com`) || HostSNI(`api.yuktiops.com`) || HostSNI(`doc.yuktiops.com`)
-      tls:
-        passthrough: true
-      service: yuktiops-caddy
-  services:
-    yuktiops-caddy:
-      loadBalancer:
-        proxyProtocol:
-          version: 2
-        servers:
-          - address: 'yuktiops-web-1:443'
-```
-`yuktiops-web-1` is the Caddy container name (`docker ps --format '{{.Names}}' | grep web`). Traefik must be
-reloaded or watch the directory. Only these hostnames are passed through; everything else is unchanged.
+## 3. Traefik: nothing to edit when the Docker provider is on
+`docker-compose.traefik.yml` puts labels on the Caddy container that declare one TCP router (SNI passthrough
+with PROXY protocol v2). Traefik discovers it when it runs with `--providers.docker=true` and shares the
+`TRAEFIK_NETWORK` network. Your other routers, certificates and files are not changed.
+If your 443 entrypoint is not called `websecure`, set `TRAEFIK_ENTRYPOINT` in `.env.production`.
+
+Without the Docker provider, declare the same thing in Traefik's file provider: a `tcp.routers` entry with
+`HostSNI(...)`, `tls.passthrough: true`, and a `tcp.services` entry pointing at `yuktiops-web-1:443` with
+`proxyProtocol.version: 2`.
 
 ## 4. Environment and start
 ```bash
